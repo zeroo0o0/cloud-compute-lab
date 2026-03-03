@@ -1,6 +1,6 @@
 
 
-# Cloud Comute Book / Warzone 多人对战游戏
+# Cloud Compute Book / Warzone 多人对战游戏
 
 本项目包含两个实现的局域网多人对战游戏： C++ 版本和 Go 版本。
 
