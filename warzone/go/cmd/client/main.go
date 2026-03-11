@@ -1,21 +1,35 @@
 package main
 
 import (
-	"flag"
-	"log"
+	"warzone/internal/client"
+	"fmt"
+	"os"
+	"strconv"
+)
 
-	"cs/internal/client"
-	"cs/internal/client/tui"
+const (
+	defaultHost = "127.0.0.1"
+	defaultPort = 9000
 )
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:7777", "server address")
-	name := flag.String("name", "player", "player name")
-	flag.Parse()
+	host := defaultHost
+	port := defaultPort
 
-	backend := client.NewNetBackend()
-	app := tui.New(backend)
-	if err := app.Run(*addr, *name); err != nil {
-		log.Fatal(err)
+	if len(os.Args) >= 2 {
+		host = os.Args[1]
+	}
+	if len(os.Args) >= 3 {
+		p, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "无效端口: %s\n", os.Args[2])
+			os.Exit(1)
+		}
+		port = p
+	}
+
+	if err := client.Run(host, port); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }

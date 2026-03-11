@@ -1,48 +1,28 @@
 package main
 
 import (
-	"flag"
-	"io"
-	"log"
+	"warzone/internal/server"
+	"fmt"
 	"os"
-
-	"cs/internal/server"
+	"strconv"
 )
 
+const defaultPort = 9000
+
 func main() {
-	addr := flag.String("addr", ":7777", "listen address")
-	mapW := flag.Int("w", 20, "map width")
-	mapH := flag.Int("h", 10, "map height")
-	dbPath := flag.String("db", "game.db", "sqlite db path")
-	logOutput := flag.String("log", "stdout", "log output: stdout or file path")
-	flag.Parse()
-
-	var out io.Writer = os.Stdout
-	var logFile *os.File
-	if *logOutput != "stdout" {
-		f, err := os.OpenFile(*logOutput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	port := defaultPort
+	if len(os.Args) >= 2 {
+		p, err := strconv.Atoi(os.Args[1])
 		if err != nil {
-			log.Fatal(err)
+			fmt.Fprintf(os.Stderr, "无效端口: %s\n", os.Args[1])
+			os.Exit(1)
 		}
-		logFile = f
-		out = f
-	}
-	if logFile != nil {
-		defer func() {
-			_ = logFile.Close()
-		}()
+		port = p
 	}
 
-	logger := log.New(out, "server ", log.LstdFlags)
-
-	store, err := server.NewSqliteStore(*dbPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	srv := server.New(*addr, *mapW, *mapH, store, logger)
-	logger.Printf("server listening on %s", *addr)
-	if err := srv.Start(); err != nil {
-		logger.Fatal(err)
+	srv := server.New("data")
+	if err := srv.Start(port); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
