@@ -5,20 +5,14 @@ import (
 	"net"
 	"os"
 	"runtime"
-	"warzone/exp6/internal/exp6proto"
+	"warzone/ch3/internal/ch3proto"
+	"warzone/ch3/internal/ch3render"
 
 	"golang.org/x/term"
 )
 
-func renderState(ws exp6proto.WorldState) {
-	fmt.Printf("\r[frame=%d] ", ws.Frame)
-	for _, p := range ws.Players {
-		fmt.Printf("P%d(%d,%d,hp=%d) ", p.ID, p.X, p.Y, p.HP)
-	}
-	if ws.Event != "" {
-		fmt.Printf("event=%s", ws.Event)
-	}
-	fmt.Print("\n按键控制: w/a/s/d移动, j攻击, q退出 > ")
+func renderState(ws ch3proto.WorldState) {
+	fmt.Printf("\r%s\n按键控制: w/a/s/d移动, j攻击, q退出 > ", ch3render.FormatWorldState(ws, 20, 10))
 }
 
 func readSingleKey() (byte, error) {
@@ -57,8 +51,8 @@ func main() {
 		lastFrame := -1
 		var lastState string
 		for {
-			var ws exp6proto.WorldState
-			if err := exp6proto.RecvJSON(conn, &ws); err != nil {
+			var ws ch3proto.WorldState
+			if err := ch3proto.RecvJSON(conn, &ws); err != nil {
 				fmt.Println("server disconnected:", err)
 				os.Exit(0)
 			}
@@ -97,8 +91,8 @@ func main() {
 		default:
 			continue
 		}
-		msg := exp6proto.InputMsg{Action: action}
-		if err := exp6proto.SendJSON(conn, msg); err != nil {
+		msg := ch3proto.InputMsg{Action: action}
+		if err := ch3proto.SendJSON(conn, msg); err != nil {
 			fmt.Println("send err:", err)
 			return
 		}

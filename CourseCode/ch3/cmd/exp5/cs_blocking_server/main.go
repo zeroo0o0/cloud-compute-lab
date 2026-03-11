@@ -35,6 +35,7 @@ func main() {
 	fmt.Println("演示方法：开3个client窗口连接，观察只有第1个能交互")
 	fmt.Println()
 
+	busy := false
 	id := 0
 	for {
 		conn, err := ln.Accept()
@@ -42,9 +43,17 @@ func main() {
 			continue
 		}
 		id++
+		if busy {
+			fmt.Printf("[blocking] client#%d 尝试连接，但服务器正忙：%s\n", id, conn.RemoteAddr())
+			_, _ = conn.Write([]byte("[server] 当前阻塞服务器正在处理前一个客户端，你正在排队中，请稍后重试。\n"))
+			_ = conn.Close()
+			continue
+		}
+		busy = true
 		fmt.Printf("[blocking] 接受连接 #%d from %s\n", id, conn.RemoteAddr())
 		// *** 关键：直接调用而不是 go，导致阻塞 ***
 		handleClient(conn, id)
+		busy = false
 		// 只有这个客户端断开后才能 Accept 下一个
 		time.Sleep(100 * time.Millisecond)
 	}

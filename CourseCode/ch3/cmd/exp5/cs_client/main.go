@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 )
 
 func main() {
@@ -30,6 +31,15 @@ func main() {
 
 	stdin := bufio.NewReader(os.Stdin)
 	netR := bufio.NewReader(conn)
+	_ = conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	if msg, err := netR.ReadString('\n'); err == nil {
+		fmt.Print(msg)
+		if port == "9105" {
+			fmt.Println("当前连接的是阻塞服务器；若收到排队提示，说明服务端正在忙。")
+			return
+		}
+	}
+	_ = conn.SetReadDeadline(time.Time{})
 	for {
 		fmt.Print("> ")
 		line, _ := stdin.ReadString('\n')

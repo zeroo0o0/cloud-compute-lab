@@ -1,4 +1,4 @@
-package exp6proto
+package ch3proto
 
 import (
 	"encoding/binary"
@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 )
-
-// Step3/6/7 common messages
 
 type FrameMessage struct {
 	From string `json:"from"`
@@ -20,12 +18,16 @@ type InputMsg struct {
 	Action   string `json:"action"`
 }
 
+type JoinMsg struct {
+	PlayerID int `json:"player_id"`
+}
+
 type PlayerState struct {
-	ID     int `json:"id"`
-	X      int `json:"x"`
-	Y      int `json:"y"`
-	HP     int `json:"hp"`
-	LastFx int `json:"last_fx"`
+	ID     int  `json:"id"`
+	X      int  `json:"x"`
+	Y      int  `json:"y"`
+	HP     int  `json:"hp"`
+	Online bool `json:"online"`
 }
 
 type WorldState struct {
@@ -34,7 +36,6 @@ type WorldState struct {
 	Event   string        `json:"event"`
 }
 
-// SendJSON writes [4-byte little-endian length][json bytes]
 func SendJSON(w io.Writer, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -50,7 +51,6 @@ func SendJSON(w io.Writer, v any) error {
 	return err
 }
 
-// RecvJSON reads [4-byte little-endian length] then unmarshals JSON.
 func RecvJSON(r io.Reader, out any) error {
 	var n uint32
 	if err := binary.Read(r, binary.LittleEndian, &n); err != nil {

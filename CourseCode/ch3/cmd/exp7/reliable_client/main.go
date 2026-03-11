@@ -4,23 +4,14 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"time"
-	"warzone/exp6/internal/exp6net"
-	"warzone/exp6/internal/exp6proto"
+	"warzone/ch3/internal/ch3net"
+	"warzone/ch3/internal/ch3proto"
+	"warzone/ch3/internal/ch3render"
 
 	"golang.org/x/term"
 )
-
-func renderState(ws exp6proto.WorldState) {
-	fmt.Printf("\r[frame=%d] ", ws.Frame)
-	for _, p := range ws.Players {
-		fmt.Printf("P%d(%d,%d,hp=%d) ", p.ID, p.X, p.Y, p.HP)
-	}
-	if ws.Event != "" {
-		fmt.Printf("| %s", ws.Event)
-	}
-	fmt.Print("\n按键控制: w/a/s/d移动, j攻击, q退出 > ")
-}
 
 func readSingleKey() (byte, error) {
 	var buf [1]byte
@@ -28,21 +19,36 @@ func readSingleKey() (byte, error) {
 	return buf[0], err
 }
 
+func parsePlayerID(args []string) int {
+	if len(args) > 2 {
+		if v, err := strconv.Atoi(args[2]); err == nil {
+			return v
+		}
+	}
+	return -1
+}
+
 func main() {
 	host := "127.0.0.1"
 	if len(os.Args) > 1 {
 		host = os.Args[1]
 	}
+	playerID := parsePlayerID(os.Args)
 	conn, err := net.Dial("tcp", host+":9108")
 	if err != nil {
 		panic(err)
 	}
-	rc := exp6net.NewReliableConn(conn)
+	rc := ch3net.NewReliableConn(conn)
 	defer rc.Close()
+	_ = rc.Send(ch3proto.JoinMsg{PlayerID: playerID})
 	fmt.Println("=== Step7 ReliableConn 客户端 ===")
 	fmt.Println("连接到", host+":9108")
-	fmt.Println("特点: 使用 rc.Recv(50ms) 非阻塞收包，超时则继续渲染循环")
+	fmt.Println("特点: 使用 rc.Recv(50ms) 非阻塞收包，支持断线后按相同 playerID 重连")
 	fmt.Println("输入: 直接按 w/a/s/d 移动, j 攻击, q 退出")
+	fmt.Println("重连示例: go run ./cmd/exp7/reliable_client 127.0.0.1 0")
+	if playerID < 0 {
+		fmt.Println("警告: 未指定 playerID，服务器将拒绝连接。请使用 0 或 1。")
+	}
 	fmt.Println()
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -75,12 +81,12 @@ func main() {
 		select {
 		case <-ticker.C:
 			// 1. 非阻塞收取服务器状态 (50ms 超时)
-			var ws exp6proto.WorldState
+			var ws ch3proto.WorldState
 			err := rc.Recv(50*time.Millisecond, &ws)
 			if err == nil {
 				stateKey := fmt.Sprintf("%v|%s", ws.Players, ws.Event)
 				if ws.Frame != lastFrame && stateKey != lastState {
-					renderState(ws)
+					fmt.Printf("\r%s\n按键控制: w/a/s/d移动, j攻击, q退出 > ", ch3render.FormatWorldState(ws, 20, 10))
 					lastFrame = ws.Frame
 					lastState = stateKey
 				}
@@ -115,7 +121,7 @@ func main() {
 			default:
 				continue
 			}
-			msg := exp6proto.InputMsg{Action: action}
+			msg := ch3proto.InputMsg{PlayerID: playerID, Action: action}
 			if err := rc.Send(msg); err != nil {
 				fmt.Println("send err:", err)
 				return

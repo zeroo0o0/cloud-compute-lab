@@ -1,4 +1,4 @@
-module warzone/exp6
+module warzone/ch3
 
 go 1.21
 

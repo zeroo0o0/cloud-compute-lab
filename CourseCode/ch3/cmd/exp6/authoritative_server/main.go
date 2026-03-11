@@ -6,7 +6,7 @@ import (
 	"net"
 	"sync"
 	"time"
-	"warzone/exp6/internal/exp6proto"
+	"warzone/ch3/internal/ch3proto"
 )
 
 const (
@@ -17,22 +17,23 @@ const (
 )
 
 type player struct {
-	conn net.Conn
-	id   int
-	x, y int
-	hp   int
+	conn   net.Conn
+	id     int
+	x, y   int
+	hp     int
+	online bool
 }
 
 var (
 	mu      sync.Mutex
 	players []*player
-	inputs  [maxPlayers]exp6proto.InputMsg // 本帧收集到的输入
+	inputs  [maxPlayers]ch3proto.InputMsg // 本帧收集到的输入
 	frame   int
 )
 
 type snapshot struct {
 	frame   int
-	players []exp6proto.PlayerState
+	players []ch3proto.PlayerState
 	event   string
 }
 
@@ -49,11 +50,11 @@ func clamp(v, lo, hi int) int {
 // recvWorker 持续收取某个客户端的输入
 func recvWorker(p *player) {
 	for {
-		var msg exp6proto.InputMsg
-		if err := exp6proto.RecvJSON(p.conn, &msg); err != nil {
+		var msg ch3proto.InputMsg
+		if err := ch3proto.RecvJSON(p.conn, &msg); err != nil {
 			mu.Lock()
 			fmt.Printf("[server] player#%d 断开: %v\n", p.id, err)
-			p.hp = 0
+			p.online = false
 			mu.Unlock()
 			return
 		}
@@ -64,7 +65,7 @@ func recvWorker(p *player) {
 }
 
 // applyInput 应用单个输入
-func applyInput(p *player, m exp6proto.InputMsg) {
+func applyInput(p *player, m ch3proto.InputMsg) {
 	switch m.Action {
 	case "left":
 		p.x = clamp(p.x-1, 0, mapW)
@@ -83,8 +84,11 @@ func update() string {
 	event := ""
 	frameInputs := inputs
 	for i, p := range players {
+		if !p.online {
+			continue
+		}
 		applyInput(p, frameInputs[i])
-		inputs[i] = exp6proto.InputMsg{} // 清空
+		inputs[i] = ch3proto.InputMsg{} // 清空
 	}
 	// 攻击判定
 	if len(players) == 2 {
@@ -116,9 +120,9 @@ func update() string {
 }
 
 func makeSnapshot(event string) snapshot {
-	ps := make([]exp6proto.PlayerState, len(players))
+	ps := make([]ch3proto.PlayerState, len(players))
 	for i, p := range players {
-		ps[i] = exp6proto.PlayerState{ID: p.id, X: p.x, Y: p.y, HP: p.hp}
+		ps[i] = ch3proto.PlayerState{ID: p.id, X: p.x, Y: p.y, HP: p.hp, Online: p.online}
 	}
 	return snapshot{
 		frame:   frame,
@@ -130,9 +134,9 @@ func makeSnapshot(event string) snapshot {
 // broadcast 将权威状态发给所有客户端。
 // 发送网络数据不持有 mu，避免 recvWorker 因 I/O 被长时间阻塞。
 func broadcast(s snapshot) {
-	state := exp6proto.WorldState{Frame: s.frame, Players: s.players, Event: s.event}
+	state := ch3proto.WorldState{Frame: s.frame, Players: s.players, Event: s.event}
 	for _, p := range players {
-		_ = exp6proto.SendJSON(p.conn, state)
+		_ = ch3proto.SendJSON(p.conn, state)
 	}
 }
 
@@ -151,7 +155,7 @@ func main() {
 			continue
 		}
 		id := len(players)
-		p := &player{conn: conn, id: id, x: id * 5, y: 5, hp: 100}
+		p := &player{conn: conn, id: id, x: id * 5, y: 5, hp: 100, online: true}
 		players = append(players, p)
 		fmt.Printf("[server] player#%d connected from %s\n", id, conn.RemoteAddr())
 		go recvWorker(p)

@@ -1,4 +1,4 @@
-package exp6game
+package ch3game
 
 import "math"
 
@@ -19,6 +19,7 @@ type State struct {
 	P0    Fighter
 	P1    Fighter
 	Event string
+	Over  bool
 }
 
 func clamp(v, lo, hi int) int {
@@ -31,7 +32,6 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-// DeterministicUpdate computes next frame deterministically on both peers.
 func DeterministicUpdate(prev State, local Input, remote Input, isHost bool) State {
 	next := prev
 	next.Frame++
@@ -53,11 +53,11 @@ func DeterministicUpdate(prev State, local Input, remote Input, isHost bool) Sta
 	dy := float64(next.P0.Y - next.P1.Y)
 	dist := math.Sqrt(dx*dx + dy*dy)
 
-	if in0.Attack && dist < 1.0 {
+	if in0.Attack && dist <= 1.0 {
 		next.P1.HP -= 10
 		next.Event += "P0 hit P1; "
 	}
-	if in1.Attack && dist < 1.0 {
+	if in1.Attack && dist <= 1.0 {
 		next.P0.HP -= 10
 		next.Event += "P1 hit P0; "
 	}
@@ -66,6 +66,16 @@ func DeterministicUpdate(prev State, local Input, remote Input, isHost bool) Sta
 	}
 	if next.P1.HP < 0 {
 		next.P1.HP = 0
+	}
+	if next.P0.HP <= 0 || next.P1.HP <= 0 {
+		next.Over = true
+		if next.P0.HP <= 0 && next.P1.HP <= 0 {
+			next.Event += "double KO"
+		} else if next.P0.HP <= 0 {
+			next.Event += "P1 wins"
+		} else {
+			next.Event += "P0 wins"
+		}
 	}
 	if next.Event == "" {
 		next.Event = "none"

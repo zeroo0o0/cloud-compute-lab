@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 	"time"
-	"warzone/exp6/internal/exp6proto"
+	"warzone/ch3/internal/ch3proto"
 )
 
 func server() {
@@ -20,13 +20,13 @@ func server() {
 	defer conn.Close()
 
 	for i := 0; i < 3; i++ {
-		var m exp6proto.FrameMessage
-		if err := exp6proto.RecvJSON(conn, &m); err != nil {
+		var m ch3proto.FrameMessage
+		if err := ch3proto.RecvJSON(conn, &m); err != nil {
 			fmt.Println("recv err:", err)
 			return
 		}
 		fmt.Printf("server recv: %+v\n", m)
-		_ = exp6proto.SendJSON(conn, exp6proto.FrameMessage{From: "server", Text: "ack:" + m.Text})
+		_ = ch3proto.SendJSON(conn, ch3proto.FrameMessage{From: "server", Text: "ack:" + m.Text})
 	}
 }
 
@@ -39,9 +39,9 @@ func client() {
 	defer conn.Close()
 
 	for i := 1; i <= 3; i++ {
-		_ = exp6proto.SendJSON(conn, exp6proto.FrameMessage{From: "client", Text: fmt.Sprintf("msg-%d", i)})
-		var resp exp6proto.FrameMessage
-		if err := exp6proto.RecvJSON(conn, &resp); err != nil {
+		_ = ch3proto.SendJSON(conn, ch3proto.FrameMessage{From: "client", Text: fmt.Sprintf("msg-%d", i)})
+		var resp ch3proto.FrameMessage
+		if err := ch3proto.RecvJSON(conn, &resp); err != nil {
 			fmt.Println("recv ack err:", err)
 			return
 		}

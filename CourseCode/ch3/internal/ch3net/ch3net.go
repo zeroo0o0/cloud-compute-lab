@@ -1,12 +1,11 @@
-package exp6net
+package ch3net
 
 import (
 	"net"
 	"time"
-	"warzone/exp6/internal/exp6proto"
+	"warzone/ch3/internal/ch3proto"
 )
 
-// ReliableConn wraps framing + JSON + timeout receive.
 type ReliableConn struct {
 	conn net.Conn
 }
@@ -16,15 +15,18 @@ func NewReliableConn(conn net.Conn) *ReliableConn {
 }
 
 func (rc *ReliableConn) Send(v any) error {
-	return exp6proto.SendJSON(rc.conn, v)
+	return ch3proto.SendJSON(rc.conn, v)
 }
 
-// Recv blocks until data, timeout, or error.
 func (rc *ReliableConn) Recv(timeout time.Duration, out any) error {
 	if err := rc.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return err
 	}
-	return exp6proto.RecvJSON(rc.conn, out)
+	return ch3proto.RecvJSON(rc.conn, out)
+}
+
+func (rc *ReliableConn) RawConn() net.Conn {
+	return rc.conn
 }
 
 func (rc *ReliableConn) Close() error {
