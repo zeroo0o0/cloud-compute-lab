@@ -71,58 +71,68 @@ go build ./...
 
 ### Step 1 — 单机本地游戏原型
 
-**知识点**：Game Loop（输入 → 计算 → 渲染）
 
-**核心函数**：`readInput()` → `updateState()` → `render()`
+**知识点**：Game Loop（输入 → 计算 → 渲染）、异步并发指令采集（Goroutine + Channel）、基于 Tick 的状态驱动（非阻塞同步）
+
+**核心函数**：`Scanner.Scan()`（异步写入通道） → `<-ticker.C`（主循环触发） → `updateState()`（逻辑推演） → `render()`（画面投影）
 
 ```powershell
-cd ch3
+# 在存放代码的目录下运行
 go run ./cmd/exp1/loop
+
+
+**操作**：1.基础输入：输入 W/A/S/D（不区分大小写）并按回车，观察指令被放入异步队列（模拟网络发送缓冲，但不会立刻执行）。
+
+2.静静观察：双手离开键盘，观察系统每隔 5 秒依然会严格执行“采集 → 计算 → 渲染”三步曲，体会“世界不因玩家静止而静止”的服务器绝对时间轴。
+
+3.并发覆盖测试：在 5 秒倒计时内疯狂输入多个移动指令（例如 W, W, D），观察 Tick 结算时，系统如何通过通道清洗（Channel Draining）策略，最终仅执行最后一次有效输入。
+
+4.退出程序：按 Ctrl+C 强制结束主循环退出。
 ```
-
-**操作**：输入 `w/a/s/d` 移动，`j` 攻击，`q` 退出。观察每次输入后坐标和状态刷新。
-
 ---
 
-### Step 2 — Socket 通信程序
+### Step 2 — 交互式 Socket 通信程序
 
-**知识点**：`net.Listen` / `listener.Accept()` / `net.Dial` / `conn.Write` / `conn.Read`
+**知识点**：`net.Listen` (绑定 `0.0.0.0` 通配 IP) / `listener.Accept()` / `net.Dial` / `conn.Write` / `conn.Read` / 长连接与终端交互 (`bufio.Scanner`)
 
 #### 单机运行（两个终端）
 
 ```powershell
 # 终端1 — 启动服务器
-go run ./cmd/exp2/socket_server
+go run ./cmd/exp2/socket_server 
 
 # 终端2 — 启动客户端
 go run ./cmd/exp2/socket_client
+# 提示输入 IP 时，直接按回车键（系统将默认连接本机 127.0.0.1:8888）
 ```
-
-#### 多机运行
-
+#### 多机运行（两个终端）
 ```powershell
-# 机器A（服务器）
-go run ./cmd/exp2/socket_server               # 监听 :9102
+# 机器A（服务器 / 教师端）
+go run ./cmd/exp2/socket_server               # 默认监听 :8888，自动开放给整个局域网
 
-# 机器B（客户端）— 将 IP 替换为机器A 的地址
-go run ./cmd/exp2/socket_client 192.168.x.x
+# 机器B（客户端 / 学生端）
+go run ./cmd/exp2/socket_client
+# 启动后，根据控制台提示，手动输入机器A 的局域网 IP 地址 (例如 192.168.1.100)
 ```
-
-**操作**：客户端输入文字，观察服务端回显。
 
 ---
 
-### Step 3 — TCP 粘包与消息序列化
+### Step 3 — TCP 粘包与消息序列化（含正反面对比）
 
-**知识点**：TCP 是无边界字节流；用 4 字节长度前缀 + `json.Marshal` 传结构化消息。
+**知识点**：TCP 是无边界的连续字节流（水管模型）；利用4 字节大端序长度前缀 + `json.Marshal`”制定应用层通信契约，解决网络底层的粘包与半包问题。
 
-**核心函数**：`ch3proto.SendJSON()` / `ch3proto.RecvJSON()`（见 `internal/ch3proto/ch3proto.go`）
+**核心函数**：`sendJSON()`（`binary.Write` 写入 4 字节长度头） / `recvJSON()`（读取长度头 + `io.ReadFull` 精确截断字节流）
+
+#### 演示粘包灾难版代码与正确处理版代码：
 
 ```powershell
-go run ./cmd/exp3/framing_demo
-```
+# 运行粘包灾难版代码 
+go run ./cmd/exp3/step3_sticky_packets
 
-**观察输出**：客户端连续发送 3 条 JSON 消息，服务端逐条正确解析并回复——证明长度前缀解决了粘包。
+# 运行正确处理版代码
+go run ./cmd/exp3/step3_framing_demo
+
+```
 
 ---
 
