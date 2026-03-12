@@ -15,10 +15,14 @@
 
 ```text
 .
-├── Lab/
-├── warzone/
-│   ├── c++/
-│   └── go/
-├── .gitignore
-├── README.en.md
-└── README.md
+|-- CourseCode
+|   |-- ch3
+|   |-- ch4
+|   `-- ch5
+|-- Lab
+|   |-- Lab1
+|   `-- Lab2
+|-- README.md
+`-- warzone
+    |-- c++
+    `-- go
