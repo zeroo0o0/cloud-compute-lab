@@ -1,12 +1,12 @@
 package main
 
 import (
+	"ch3/internal/ch3proto"
+	"ch3/internal/ch3render"
 	"fmt"
 	"net"
 	"os"
 	"runtime"
-	"warzone/ch3/internal/ch3proto"
-	"warzone/ch3/internal/ch3render"
 
 	"golang.org/x/term"
 )

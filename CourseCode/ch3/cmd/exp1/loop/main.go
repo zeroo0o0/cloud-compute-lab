@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"ch3/internal/ch3render"
 	"fmt"
 	"os"
 	"strings"
@@ -16,6 +17,21 @@ type gameState struct {
 	Status string
 }
 
+const (
+	mapW = 10
+	mapH = 6
+)
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
 func readInput(r *bufio.Reader) string {
 	fmt.Print("输入(w/a/s/d移动, j攻击, q退出): ")
 	line, _ := r.ReadString('\n')
@@ -25,6 +41,7 @@ func readInput(r *bufio.Reader) string {
 func updateState(s *gameState, in string) bool {
 	s.Tick++
 	s.Status = "idle"
+	oldX, oldY := s.X, s.Y
 	switch in {
 	case "w":
 		s.Y--
@@ -43,11 +60,23 @@ func updateState(s *gameState, in string) bool {
 	case "q":
 		return false
 	}
+
+	// 限制移动范围：不允许负坐标，且不超过地图边界。
+	s.X = clamp(s.X, 0, mapW)
+	s.Y = clamp(s.Y, 0, mapH)
+	if in == "w" || in == "a" || in == "s" || in == "d" {
+		if s.X == oldX && s.Y == oldY {
+			s.Status = "blocked"
+		}
+	}
 	return true
 }
 
 func render(s gameState) {
-	fmt.Printf("\n[Frame=%d] Pos=(%d,%d) HP=%d Status=%s\n\n", s.Tick, s.X, s.Y, s.HP, s.Status)
+	fmt.Printf("\n[Frame=%d] Pos=(%d,%d) HP=%d Status=%s\n", s.Tick, s.X, s.Y, s.HP, s.Status)
+	// Step1 只有本地玩家：复用 internal/ch3render 的地图渲染函数。
+	fmt.Println(ch3render.RenderDuelMap(s.X, s.Y, -999, -999, mapW, mapH))
+	fmt.Println()
 }
 
 func main() {

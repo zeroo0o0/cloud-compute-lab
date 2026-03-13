@@ -2,13 +2,13 @@ package main
 
 import (
 	"bufio"
+	"ch3/internal/ch3game"
+	"ch3/internal/ch3proto"
+	"ch3/internal/ch3render"
 	"fmt"
 	"net"
 	"os"
 	"strings"
-	"warzone/ch3/internal/ch3game"
-	"warzone/ch3/internal/ch3proto"
-	"warzone/ch3/internal/ch3render"
 )
 
 func parseInput(s string) ch3game.Input {

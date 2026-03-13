@@ -1,9 +1,9 @@
 package ch3net
 
 import (
+	"ch3/internal/ch3proto"
 	"net"
 	"time"
-	"warzone/ch3/internal/ch3proto"
 )
 
 type ReliableConn struct {

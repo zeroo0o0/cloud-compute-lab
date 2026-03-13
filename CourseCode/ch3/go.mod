@@ -1,4 +1,4 @@
-module warzone/ch3
+module ch3
 
 go 1.21
 
