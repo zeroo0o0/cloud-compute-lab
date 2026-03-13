@@ -1,9 +1,9 @@
 package ch3render
 
 import (
+	"ch3/internal/ch3proto"
 	"fmt"
 	"strings"
-	"warzone/ch3/internal/ch3proto"
 )
 
 func RenderDuelMap(p0x, p0y, p1x, p1y int, width, height int) string {

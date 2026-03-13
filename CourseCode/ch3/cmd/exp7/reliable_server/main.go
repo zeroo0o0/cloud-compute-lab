@@ -1,13 +1,13 @@
 package main
 
 import (
+	"ch3/internal/ch3net"
+	"ch3/internal/ch3proto"
 	"fmt"
 	"math"
 	"net"
 	"sync"
 	"time"
-	"warzone/ch3/internal/ch3net"
-	"warzone/ch3/internal/ch3proto"
 )
 
 const (
