@@ -124,6 +124,11 @@ go run ./cmd/exp2/socket_client
 # 运行粘包灾难版代码 
 go run ./cmd/exp3/step3_sticky_packets
 
+
+# 运行粘包灾难版代码(游戏地图的ui视觉效果) 
+go run ./cmd/exp3/game_sticky_packets
+
+
 # 运行正确处理版代码
 go run ./cmd/exp3/step3_framing_demo
 
