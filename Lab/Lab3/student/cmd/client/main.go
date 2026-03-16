@@ -288,11 +288,26 @@ func setShopOpen(open bool) {
 }
 
 func addClientNote(text string) {
+	if shouldSuppressClientNote(text) {
+		return
+	}
 	uiMu.Lock()
 	defer uiMu.Unlock()
-	clientNotes = append(clientNotes, time.Now().Format("15:04:05")+"  "+text)
+	clientNotes = append(clientNotes, text)
 	if len(clientNotes) > 5 {
 		clientNotes = clientNotes[len(clientNotes)-5:]
+	}
+}
+
+func shouldSuppressClientNote(text string) bool {
+	switch text {
+	case "向上移动", "向下移动", "向左移动", "向右移动",
+		"发起近战攻击", "使用药剂", "挑战世界首领",
+		"切换到青岚要塞", "切换到玄矿地窟", "切换到残星遗迹",
+		"购买药剂", "强化武器":
+		return true
+	default:
+		return false
 	}
 }
 
