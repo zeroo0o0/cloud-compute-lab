@@ -17,6 +17,8 @@
 go.sum
 *.test
 *.prof
+# 全局忽略所有 .gocache 目录（关键新增规则）
+**/.gocache/
 
 # GoLand/IDE 生成文件
 .idea/
