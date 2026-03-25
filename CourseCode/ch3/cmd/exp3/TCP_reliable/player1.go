@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net"
-	"time"
 )
 
 func main() {
@@ -13,13 +12,22 @@ func main() {
 	}
 	defer conn.Close()
 
-	// 稍微等一下，确保玩家2也连上了
-	time.Sleep(1 * time.Second)
+	hp := 100
+	fmt.Printf("[玩家1] 成功上线，当前血量: %d HP\n", hp)
+	fmt.Println("[玩家1] 正在等待玩家2上线...")
 
-	// 发起攻击
-	conn.Write([]byte("ATTACK"))
+	// 核心修改：阻塞等待服务器发送 P2_ONLINE 信号
+	signalBuf := make([]byte, 9)
+	conn.Read(signalBuf)
 
-	// 正常读取服务器广播的状态
+	if string(signalBuf) == "P2_ONLINE" {
+		fmt.Println("[玩家1] 发现玩家2已上线！")
+		// 严格保证在玩家2上线后才执行这句
+		fmt.Println("[玩家1] 对玩家2发起致命一击！")
+		conn.Write([]byte("ATTACK"))
+	}
+
+	// 接收服务器广播的死亡状态
 	buf := make([]byte, 23)
 	conn.Read(buf)
 	fmt.Printf("[玩家1] 收到状态: %s\n", string(buf))
