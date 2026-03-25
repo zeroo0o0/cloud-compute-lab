@@ -14,7 +14,8 @@ cmd/
 ├─ exp3/
 │  ├─ step3_sticky_packets/
 │  ├─ game_sticky_packets/
-│  └─ step3_framing_demo/
+│  ├─ step3_framing_demo/
+│  └─ TCP_reliable/
 ├─ exp4/
 │  ├─ p2p_lockstep_host/
 │  └─ p2p_lockstep_client/
@@ -40,9 +41,15 @@ cmd/
   - `go run ./cmd/exp2/socket_server`
   - `go run ./cmd/exp2/socket_client`
 - exp3:
-  - `go run ./cmd/exp3/step3_sticky_packets`
   - `go run ./cmd/exp3/game_sticky_packets`
-  - `go run ./cmd/exp3/step3_framing_demo`
+  - `go run ./cmd/exp3/step3_sticky_packets/server.go`
+  - `go run ./cmd/exp3/step3_sticky_packets/client.go`
+  - `go run ./cmd/exp3/step3_framing_demo/server.go`
+  - `go run ./cmd/exp3/step3_framing_demo/client.go`
+  - `go run ./cmd/exp3/TCP_reliable/server.go`
+  - `go run ./cmd/exp3/TCP_reliable/player1.go`
+  - `go run ./cmd/exp3/TCP_reliable/player2.go`
+  
 - exp4:
   - `go run ./cmd/exp4/p2p_lockstep_host`
   - `go run ./cmd/exp4/p2p_lockstep_client`

@@ -1,23 +1,46 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"net"
-	"time"
+	"os"
 )
 
 func main() {
+	// 第一次连接
 	conn, err := net.Dial("tcp", "127.0.0.1:8888")
 	if err != nil {
 		panic(err)
 	}
-	defer conn.Close()
 
-	fmt.Println("[玩家2] 突然断网 (网线被拔/进程卡死)！")
-	fmt.Println("# (玩家2永远收不到\"DEAD\"消息)")
+	hp := 100
+	fmt.Printf("[玩家2] 首次上线成功，当前血量: %d HP\n", hp)
 
+	fmt.Println("[玩家2] 突然断网 (切断连接)！")
+	
+	// 发生真实断线：直接关闭底层 Socket
+	conn.Close()
 
-	time.Sleep(5 * time.Second)
+	// 阻塞终端，等待讲师手动输入回车
+	fmt.Print("\n>>> 请在终端按下回车键，模拟玩家2唤醒重启客户端 <<<")
+	reader := bufio.NewReader(os.Stdin)
+	reader.ReadBytes('\n')
 
-	fmt.Println("[玩家2] 重启（以为自己满血）！")
+	// 唤醒后：发起全新的 TCP 连接
+	fmt.Println("\n[玩家2] 客户端唤醒，正在重新连接服务器...")
+	reconnectConn, err := net.Dial("tcp", "127.0.0.1:8888")
+	if err != nil {
+		fmt.Printf("[玩家2] 重连失败: %v\n", err)
+		return
+	}
+	defer reconnectConn.Close()
+
+	// 客户端本地状态重置
+	fmt.Printf("[玩家2] 重连成功！当前血量: %d HP\n", hp)
+	
+	
+	// 保持进程存活，接收服务端的欢迎消息
+	welcomeBuf := make([]byte, 12)
+	reconnectConn.Read(welcomeBuf)
 }
