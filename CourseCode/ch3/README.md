@@ -143,7 +143,20 @@ go run ./cmd/exp3/step3_sticky_packets/server.go
 go run ./cmd/exp3/step3_sticky_packets/client.go
 ```
 
+在mac系统中，可以通过如下命令来关闭回环网卡从而模拟网络故障：
+```shell
+sudo ifconfig lo0 down
+```
 
+通过下面的命令恢复：
+```shell
+sudo ifconfig lo0 up
+```
+
+检验回环网卡是否关闭：
+```shell
+ping 127.0.0.1
+```
 
 #### 演示 3：长度前缀 + JSON 正确版（两个终端）
 
