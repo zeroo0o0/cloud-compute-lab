@@ -157,10 +157,38 @@ func makeSnapshot(event string) snapshot {
 
 func broadcast(s snapshot) {
 	state := ch3proto.WorldState{Frame: s.frame, Players: s.players, Event: s.event}
+	type target struct {
+		id int
+		rc *ch3net.ReliableConn
+	}
+
+	mu.Lock()
+	targets := make([]target, 0, len(players))
 	for _, p := range players {
 		if p.online && p.rc != nil {
-			_ = p.rc.Send(state)
+			targets = append(targets, target{id: p.id, rc: p.rc})
 		}
+	}
+	mu.Unlock()
+
+	for _, t := range targets {
+		err := t.rc.SendTimeout(30*time.Millisecond, state)
+		if err == nil {
+			continue
+		}
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			fmt.Printf("[server] player#%d send timeout, drop frame=%d\n", t.id, s.frame)
+			continue
+		}
+		mu.Lock()
+		p := players[t.id]
+		if p.rc == t.rc {
+			fmt.Printf("[server] player#%d send failed: %v\n", p.id, err)
+			p.online = false
+			_ = p.rc.Close()
+			p.rc = nil
+		}
+		mu.Unlock()
 	}
 }
 
@@ -181,12 +209,12 @@ func acceptLoop(ln net.Listener) {
 		}
 		p := attachPlayer(conn, join.PlayerID)
 		if p == nil {
-			_ = rc.Send(ch3proto.WorldState{Event: "服务器满员，无法加入/重连"})
+			_ = rc.SendTimeout(200*time.Millisecond, ch3proto.WorldState{Event: "服务器满员，无法加入/重连"})
 			_ = conn.Close()
 			continue
 		}
 		fmt.Printf("[server] player#%d 已连接/重连，恢复位置(%d,%d) hp=%d\n", p.id, p.x, p.y, p.hp)
-		_ = p.rc.Send(ch3proto.WorldState{
+		_ = p.rc.SendTimeout(200*time.Millisecond, ch3proto.WorldState{
 			Frame:   frame,
 			Players: []ch3proto.PlayerState{{ID: p.id, X: p.x, Y: p.y, HP: p.hp, Online: true}},
 			Event:   fmt.Sprintf("rejoined as player %d", p.id),
@@ -206,7 +234,7 @@ func main() {
 	fmt.Println("等待客户端连接/重连...")
 	go acceptLoop(ln)
 
-	for frame < 500 {
+	for frame < 10000 {
 		time.Sleep(tickRate)
 		mu.Lock()
 		event := update()

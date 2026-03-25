@@ -3,11 +3,13 @@ package ch3net
 import (
 	"ch3/internal/ch3proto"
 	"net"
+	"sync"
 	"time"
 )
 
 type ReliableConn struct {
-	conn net.Conn
+	conn    net.Conn
+	writeMu sync.Mutex
 }
 
 func NewReliableConn(conn net.Conn) *ReliableConn {
@@ -15,6 +17,19 @@ func NewReliableConn(conn net.Conn) *ReliableConn {
 }
 
 func (rc *ReliableConn) Send(v any) error {
+	return rc.SendTimeout(0, v)
+}
+
+func (rc *ReliableConn) SendTimeout(timeout time.Duration, v any) error {
+	rc.writeMu.Lock()
+	defer rc.writeMu.Unlock()
+
+	if timeout > 0 {
+		if err := rc.conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
+		defer rc.conn.SetWriteDeadline(time.Time{})
+	}
 	return ch3proto.SendJSON(rc.conn, v)
 }
 
