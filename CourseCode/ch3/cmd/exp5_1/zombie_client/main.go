@@ -109,6 +109,7 @@ func main() {
 	fmt.Println("=== Step5.1 僵尸玩家演示客户端 ===")
 	fmt.Println("连接到", host+":9110", "as player", playerID)
 	fmt.Println("演示方法: 启动 2 个客户端后，让其中一个客户端进入 'blackhole' 模式模拟断网（不关闭连接）")
+	fmt.Println("观察点: read-block 模式看第三个客户端无法入场；write-illusion 模式看 event 与正常玩家卡顿。")
 	fmt.Println("热键: 按 t 切换 blackhole(模拟断网) / normal(正常联网)")
 	if runtime.GOOS == "windows" {
 		fmt.Println("Windows 说明: 因为 client/server 同机运行，不方便拔网线；推荐直接用 t 热键模拟半开/僵尸玩家")
@@ -131,7 +132,7 @@ func main() {
 
 	// 收包协程（可被 blackhole 开关暂停；正常模式下做去重）
 	go func() {
-		lastFrame := -1
+		lastRenderedFrame := -1
 		var frozenWs ch3proto.WorldState
 		hasFrozen := false
 		blackhole := false
@@ -178,9 +179,9 @@ func main() {
 			// 去刷屏：只要帧号变化才渲染一次。
 			// 注意：服务器的 spam 消息不是 WorldState，解码会失败并断开；
 			// 所以 server 端 spam 必须保持为“可被忽略”或 client 只读 WorldState。
-			if ws.Frame != lastFrame {
+			if ws.Frame != lastRenderedFrame {
 				renderState(ws)
-				lastFrame = ws.Frame
+				lastRenderedFrame = ws.Frame
 			}
 		}
 	}()
