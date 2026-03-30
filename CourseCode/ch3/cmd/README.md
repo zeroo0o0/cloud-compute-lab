@@ -59,7 +59,6 @@ cmd/
   - `go run ./cmd/exp5/cs_client`
 - exp5_1:
   - `go run ./cmd/exp5_1/zombie_server read-block`
-  - `go run ./cmd/exp5_1/zombie_server write-illusion`
   - `go run ./cmd/exp5_1/zombie_client`
 - exp6:
   - `go run ./cmd/exp6/authoritative_server`

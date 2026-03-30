@@ -7,6 +7,22 @@ import (
 	"io"
 )
 
+func writeFull(w io.Writer, b []byte) error {
+	for len(b) > 0 {
+		n, err := w.Write(b)
+		if n > 0 {
+			b = b[n:]
+		}
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
+}
+
 type FrameMessage struct {
 	From string `json:"from"`
 	Text string `json:"text"`
@@ -44,11 +60,12 @@ func SendJSON(w io.Writer, v any) error {
 	if len(b) > int(^uint32(0)) {
 		return fmt.Errorf("payload too large: %d", len(b))
 	}
-	if err := binary.Write(w, binary.LittleEndian, uint32(len(b))); err != nil {
+	var lenBuf [4]byte
+	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(b)))
+	if err := writeFull(w, lenBuf[:]); err != nil {
 		return err
 	}
-	_, err = w.Write(b)
-	return err
+	return writeFull(w, b)
 }
 
 func RecvJSON(r io.Reader, out any) error {
