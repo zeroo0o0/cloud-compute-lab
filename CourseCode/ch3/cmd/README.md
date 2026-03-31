@@ -25,7 +25,8 @@ cmd/
 │  └─ cs_client/
 ├─ exp5_1/
 │  ├─ single_thread_server/
-│  │  └─ zombie_server/
+│  │  ├─ zombie_server/
+│  │  └─ zombie_client/
 │  └─ multi_thread_server/
 │     ├─ zombie_server/
 │     └─ zombie_client/
@@ -62,6 +63,7 @@ cmd/
   - `go run ./cmd/exp5/cs_client`
 - exp5_1:
   - `go run ./cmd/exp5_1/single_thread_server/zombie_server`
+  - `go run ./cmd/exp5_1/single_thread_server/zombie_client`
   - `go run ./cmd/exp5_1/multi_thread_server/zombie_server`
   - `go run ./cmd/exp5_1/multi_thread_server/zombie_client`
 - exp6:
@@ -76,3 +78,8 @@ cmd/
 - `exp5_1` 为 `exp5` 的扩展示例（僵尸连接/半开连接场景）。
 - `single_thread_server` 演示单线程 ticker 轮询读输入与广播时的读阻塞影响。
 - `multi_thread_server` 保留原有 goroutine 收包版本（`zombie_client`/`zombie_server`）。
+
+## exp5_1 单线程版说明
+
+- `single_thread_server/zombie_server` 端口为 `:9107`，按顺序接入 2 个客户端并在主循环中阻塞读输入。
+- `single_thread_server/zombie_client` 支持输入 `t` 模拟断网（不收不发），用于观察服务端阻塞现象。

@@ -32,7 +32,8 @@ ch3/
     ├── exp5/cs_concurrent_server/      # ⑤ 并发服务器（goroutine）
     ├── exp5/cs_client/                 # ⑤ 通用客户端
     ├── exp5_1/single_thread_server/    # ⑤.1 单线程服务端（ticker 轮询读+广播）
-    │   └── zombie_server/
+    │   ├── zombie_server/
+    │   └── zombie_client/
     ├── exp5_1/multi_thread_server/     # ⑤.1 多线程服务端（原有版本）
     │   ├── zombie_server/
     │   └── zombie_client/
@@ -307,7 +308,7 @@ go run ./cmd/exp5/cs_client 127.0.0.1 9106
 
 本实验分为两个版本：
 
-1. **单线程版**（`single_thread_server`）：服务器用 `ticker` 在单 goroutine 内按顺序轮询读取两个客户端输入并广播；当某个玩家进入 blackhole（僵尸）后，会占用该轮询读窗口，拖慢同一 tick 内其他玩家处理。
+1. **单线程版**（`single_thread_server`）：服务器采用 select 事件循环，不再锁步等待；谁有数据就先处理谁，并按固定 tick 广播。blackhole 玩家保持半开连接占住槽位，第三个客户端无法加入；另一个正常玩家仍可继续交互。
 2. **多线程版**（`multi_thread_server`）：保留原有 `read-block` 场景。每个连接单独 recv 协程阻塞读；僵尸玩家断网但不发 FIN 时会长期占住槽位，第三个玩家无法进入，但另一个活跃玩家仍可继续游戏。
 
 #### 单线程版运行（3个终端）
@@ -316,11 +317,11 @@ go run ./cmd/exp5/cs_client 127.0.0.1 9106
 # 终端1 — 单线程服务器（:9110）
 go run ./cmd/exp5_1/single_thread_server/zombie_server
 
-# 终端2 — 客户端 P0（复用多线程目录下客户端）
-go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 0
+# 终端2 — 客户端 P0
+go run ./cmd/exp5_1/single_thread_server/zombie_client 127.0.0.1 0
 
 # 终端3 — 客户端 P1
-go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 1
+go run ./cmd/exp5_1/single_thread_server/zombie_client 127.0.0.1 1
 ```
 
 #### 多线程版运行（4个终端，建议）
@@ -342,10 +343,10 @@ go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 0
 #### 演示操作
 
 1. 两个客户端先正常操作，确认可同步移动/攻击。
-2. 让 **任意一个客户端（P0 或 P1）** 按 **`t`** 切换 `blackhole`（模拟断网/半开）：保持 TCP 连接不关闭，但不收包也不发包。
+2. 让 **任意一个客户端（P0 或 P1）** 按 **`t`** 切换 `blackhole`（模拟断网/半开）：保持 TCP 连接不关闭，但不收包也不发包；槽位仍被占用，第三个客户端无法进入。
 3. 观察单线程版：
-    - 服务器日志中的 `block=...ms` 会明显增大，说明单线程轮询读被僵尸连接拖慢。
-    - 另一个玩家输入处理会出现更明显的 tick 抖动/延迟。
+    - 服务器 select 只会处理有数据的连接，另一个正常玩家仍可输入并看到状态广播。
+    - 僵尸玩家连接不释放，房间满员；按 `q` 退出后槽位释放，第三个客户端可再加入。
 4. 观察多线程 `read-block` 版：
     - 僵尸玩家对应连接会长期卡在 `RecvJSON/read` 等待，CPU 占用仍较低（阻塞等待）。
     - 客户端2（正常玩家）仍可继续移动/攻击，不会被客户端1的断网直接拖死。
