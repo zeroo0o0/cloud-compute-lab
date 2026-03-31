@@ -34,8 +34,12 @@ cmd/
 │  ├─ authoritative_server/
 │  └─ authoritative_client/
 └─ exp7/
-   ├─ reliable_server/
-   └─ reliable_client/
+  ├─ single_thread/
+  │  ├─ reliable_server/
+  │  └─ reliable_client/
+  └─ multi_thread/
+    ├─ reliable_server/
+    └─ reliable_client/
 ```
 
 ## 运行入口
@@ -70,8 +74,10 @@ cmd/
   - `go run ./cmd/exp6/authoritative_server`
   - `go run ./cmd/exp6/authoritative_client`
 - exp7:
-  - `go run ./cmd/exp7/reliable_server`
-  - `go run ./cmd/exp7/reliable_client`
+  - `go run ./cmd/exp7/single_thread/reliable_server`
+  - `go run ./cmd/exp7/single_thread/reliable_client`
+  - `go run ./cmd/exp7/multi_thread/reliable_server`
+  - `go run ./cmd/exp7/multi_thread/reliable_client`
 
 ## 命名说明
 

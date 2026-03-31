@@ -39,8 +39,12 @@ ch3/
     │   └── zombie_client/
     ├── exp6/authoritative_server/      # ⑥ 权威服务器
     ├── exp6/authoritative_client/      # ⑥ 权威客户端（只发输入+渲染）
-    ├── exp7/reliable_server/           # ⑦ ReliableConn 权威服务器
-    └── exp7/reliable_client/           # ⑦ ReliableConn 客户端（非阻塞收包）
+    ├── exp7/single_thread/             # ⑦ ReliableConn 单线程版（超时读）
+    │   ├── reliable_server/
+    │   └── reliable_client/
+    └── exp7/multi_thread/              # ⑦ ReliableConn 多线程版（测试中）
+        ├── reliable_server/
+        └── reliable_client/
 ```
 
 ---
@@ -402,12 +406,14 @@ go run ./cmd/exp6/authoritative_client 192.168.x.x
 
 ### Step 7 — 健壮网络通信库 ReliableConn
 
-**知识点**：`ReliableConn` 封装 `SetReadDeadline` 实现超时非阻塞收包；即使丢帧/延迟，主循环继续运行。
+**知识点**：`ReliableConn` 封装 `SetReadDeadline` 实现超时非阻塞收包；主循环继续运行。
 
 本步骤重点验证三件事：
 1. 使用长度前缀 + JSON，避免 TCP 粘包/半包导致的反序列化错位。
-2. 客户端出现丢帧/延迟时不会“假死”或状态崩坏；服务器端某帧收不到输入也不会阻塞主循环。
-3. 客户端与服务器都采用超时读取，超时时本帧按“无输入/无新状态”处理，循环继续。
+
+2. 客户端与服务器都采用超时读取，超时时本帧按“无输入/无新状态”处理，循环继续。
+
+> 说明：**多线程版本目前仍在测试中**，README 暂时仅展示单线程版的运行与说明，待测试完成后再补充多线程细节。
 
 **输入方式**：客户端也已改为 **raw 模式单键输入**，无需回车。
 
@@ -433,62 +439,27 @@ func (rc *ReliableConn) Recv(timeout, out) error
 #### 单机运行（3个终端）
 
 ```powershell
-# 终端1 — ReliableConn 服务器
-go run ./cmd/exp7/reliable_server
+# 终端1 — ReliableConn 服务器（单线程）
+go run ./cmd/exp7/single_thread/reliable_server
 
 # 终端2 — 客户端1
-go run ./cmd/exp7/reliable_client 127.0.0.1 0
+go run ./cmd/exp7/single_thread/reliable_client 127.0.0.1 0
 
 # 终端3 — 客户端2
-go run ./cmd/exp7/reliable_client 127.0.0.1 1
+go run ./cmd/exp7/single_thread/reliable_client 127.0.0.1 1
 ```
 
 #### 多机运行
 
 ```powershell
 # 机器A
-go run ./cmd/exp7/reliable_server                # 监听 :9108
+go run ./cmd/exp7/single_thread/reliable_server  # 监听 :9108
 
 # 机器B/C
-go run ./cmd/exp7/reliable_client 192.168.x.x 0
+go run ./cmd/exp7/single_thread/reliable_client 192.168.x.x 0
 ```
 
-**操作**：
-1. 正常游戏：直接按 `w/a/s/d` 移动，按 `j` 攻击
-2. **模拟掉线**：关闭一个客户端窗口，服务器不会停止，另一个客户端也不会把服务器拖死
-3. 使用相同 `playerID`（如 `0` 或 `1`）重连后，玩家会恢复到掉线前的位置和血量
-4. 控制台会渲染地图；掉线玩家会被标记为离线，重连后重新回到地图中
-5. 在任一客户端按 `u` 可触发突发发送，观察高频消息流下依旧正常解析
-6. 与 Step4 对比，可以明显看出：这里使用了超时机制后，主循环不会因某个客户端异常而卡住
 
-#### 三种鲁棒性演示（课堂建议按此顺序）
-
-1. 粘包/序列化正确性
-    - 操作：正常启动 server + 两个 client；在某个 client 先按 `p` 关闭防粘包，再按 `u` 触发突发发送。
-    - 观察（`p=OFF`）：界面会出现明显的状态卡顿/更新丢失，模拟无边界解析下的粘包灾难。
-    - 再操作：再次按 `p` 打开防粘包，再按 `u`。
-    - 观察（`p=ON`）：角色会连续位移/攻击，界面稳定。
-    - 原因：通信统一走长度前缀 + JSON（`SendJSON/RecvJSON`），即使底层出现粘包/半包也能正确拆包。
-
-2. 丢帧/延迟不致命（客户端与服务器）
-    - 操作A（客户端侧）：在某个客户端按 `t` 开启本地丢帧模拟。
-    - 观察A：该客户端画面更新会变稀疏，但不会掉线；关闭 `t` 后可继续同步。
-    - 操作B（服务器侧）：让某个客户端短时间不操作，或临时关闭一个客户端。
-    - 观察B：服务器 frame 日志继续增长；另一个在线客户端仍可正常交互。
-    - 结论：单帧收不到输入只会按“该帧无输入”处理，不会阻塞主循环。
-
-3. 读取超时与非阻塞
-    - 操作：观察 server/client 代码中的 `Recv(timeout, ...)` 路径（server 500ms，client 50ms），并在运行时制造短暂无输入窗口。
-    - 观察：超时分支只会跳过本次读取，循环继续；不会出现“卡死等包”。
-    - 结论：超时机制将“网络等待”从阻塞问题降级为“本帧无新数据”。
-
-**规则说明**：
-
-1. 客户端掉线不会直接结束服务器
-2. 服务端会保留该玩家的状态（位置、血量）
-3. 客户端必须使用固定 `playerID`（如 0/1）来重连并恢复之前状态，不能依赖重连顺序自动分配
-4. 地图渲染会显示当前在线/离线玩家，逻辑更直观
-5. 服务器广播对单个慢连接采用发送超时；慢连接最多丢帧，不会长期拖慢整个主循环
 
 ---
 
