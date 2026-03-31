@@ -31,8 +31,11 @@ ch3/
     ├── exp5/cs_blocking_server/        # ⑤ 阻塞服务器（对照组）
     ├── exp5/cs_concurrent_server/      # ⑤ 并发服务器（goroutine）
     ├── exp5/cs_client/                 # ⑤ 通用客户端
-    ├── exp5_1/zombie_server/           # ⑤.1 僵尸连接（半开连接）服务端
-    ├── exp5_1/zombie_client/           # ⑤.1 僵尸连接（半开连接）客户端
+    ├── exp5_1/single_thread_server/    # ⑤.1 单线程服务端（ticker 轮询读+广播）
+    │   └── zombie_server/
+    ├── exp5_1/multi_thread_server/     # ⑤.1 多线程服务端（原有版本）
+    │   ├── zombie_server/
+    │   └── zombie_client/
     ├── exp6/authoritative_server/      # ⑥ 权威服务器
     ├── exp6/authoritative_client/      # ⑥ 权威客户端（只发输入+渲染）
     ├── exp7/reliable_server/           # ⑦ ReliableConn 权威服务器
@@ -302,31 +305,48 @@ go run ./cmd/exp5/cs_client 127.0.0.1 9106
 
 **知识点**：TCP 半开连接（Half-Open）/ 僵尸连接：客户端“断网但不关进程”时，服务端可能既收不到数据也收不到断开通知，导致连接槽位长期被占用。
 
-本实验保留 `read-block` 场景用于课堂演示：
+本实验分为两个版本：
 
-1. `read-block`：服务器最大连接数固定为 2。每个连接的接收协程都在 `RecvJSON/read` 阻塞等待输入；僵尸玩家断网但不发送 FIN 时，会长期占住连接槽位，第三个玩家无法进入，但另一个活跃玩家仍可继续游戏。
+1. **单线程版**（`single_thread_server`）：服务器用 `ticker` 在单 goroutine 内按顺序轮询读取两个客户端输入并广播；当某个玩家进入 blackhole（僵尸）后，会占用该轮询读窗口，拖慢同一 tick 内其他玩家处理。
+2. **多线程版**（`multi_thread_server`）：保留原有 `read-block` 场景。每个连接单独 recv 协程阻塞读；僵尸玩家断网但不发 FIN 时会长期占住槽位，第三个玩家无法进入，但另一个活跃玩家仍可继续游戏。
 
-#### 单机运行（4个终端，建议）
+#### 单线程版运行（3个终端）
+
+```powershell
+# 终端1 — 单线程服务器（:9110）
+go run ./cmd/exp5_1/single_thread_server/zombie_server
+
+# 终端2 — 客户端 P0（复用多线程目录下客户端）
+go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 0
+
+# 终端3 — 客户端 P1
+go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 1
+```
+
+#### 多线程版运行（4个终端，建议）
 
 ```powershell
 # 终端1 — 服务器（:9110）
-go run ./cmd/exp5_1/zombie_server read-block
+go run ./cmd/exp5_1/multi_thread_server/zombie_server
 
 # 终端2 — 客户端 P0
-go run ./cmd/exp5_1/zombie_client 127.0.0.1 0
+go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 0
 
 # 终端3 — 客户端 P1
-go run ./cmd/exp5_1/zombie_client 127.0.0.1 1
+go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 1
 
 # 终端4 — 第三个玩家（用于观察“无法进入房间”）
-go run ./cmd/exp5_1/zombie_client 127.0.0.1 0
+go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 0
 ```
 
 #### 演示操作
 
 1. 两个客户端先正常操作，确认可同步移动/攻击。
 2. 让 **任意一个客户端（P0 或 P1）** 按 **`t`** 切换 `blackhole`（模拟断网/半开）：保持 TCP 连接不关闭，但不收包也不发包。
-3. 观察 `read-block` 模式：
+3. 观察单线程版：
+    - 服务器日志中的 `block=...ms` 会明显增大，说明单线程轮询读被僵尸连接拖慢。
+    - 另一个玩家输入处理会出现更明显的 tick 抖动/延迟。
+4. 观察多线程 `read-block` 版：
     - 僵尸玩家对应连接会长期卡在 `RecvJSON/read` 等待，CPU 占用仍较低（阻塞等待）。
     - 客户端2（正常玩家）仍可继续移动/攻击，不会被客户端1的断网直接拖死。
     - 如果客户端1是“半开僵尸”（不发不收且不关闭连接），此时启动第 3 个客户端会收到 `ROOM FULL`（槽位被僵尸占住）。

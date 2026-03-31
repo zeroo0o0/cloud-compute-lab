@@ -24,8 +24,11 @@ cmd/
 │  ├─ cs_concurrent_server/
 │  └─ cs_client/
 ├─ exp5_1/
-│  ├─ zombie_server/
-│  └─ zombie_client/
+│  ├─ single_thread_server/
+│  │  └─ zombie_server/
+│  └─ multi_thread_server/
+│     ├─ zombie_server/
+│     └─ zombie_client/
 ├─ exp6/
 │  ├─ authoritative_server/
 │  └─ authoritative_client/
@@ -58,8 +61,9 @@ cmd/
   - `go run ./cmd/exp5/cs_concurrent_server`
   - `go run ./cmd/exp5/cs_client`
 - exp5_1:
-  - `go run ./cmd/exp5_1/zombie_server read-block`
-  - `go run ./cmd/exp5_1/zombie_client`
+  - `go run ./cmd/exp5_1/single_thread_server/zombie_server`
+  - `go run ./cmd/exp5_1/multi_thread_server/zombie_server`
+  - `go run ./cmd/exp5_1/multi_thread_server/zombie_client`
 - exp6:
   - `go run ./cmd/exp6/authoritative_server`
   - `go run ./cmd/exp6/authoritative_client`
@@ -70,4 +74,5 @@ cmd/
 ## 命名说明
 
 - `exp5_1` 为 `exp5` 的扩展示例（僵尸连接/半开连接场景）。
-- 当前目录保持原路径不变，避免影响既有讲义、脚本和运行命令。
+- `single_thread_server` 演示单线程 ticker 轮询读输入与广播时的读阻塞影响。
+- `multi_thread_server` 保留原有 goroutine 收包版本（`zombie_client`/`zombie_server`）。

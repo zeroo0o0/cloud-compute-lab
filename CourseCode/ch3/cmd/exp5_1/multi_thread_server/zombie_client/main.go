@@ -78,7 +78,7 @@ func main() {
 	}
 	playerID := parsePlayerID(os.Args)
 	if playerID != 0 && playerID != 1 {
-		fmt.Println("用法: go run ./cmd/exp5_1/zombie_client 127.0.0.1 0  # 或 1")
+		fmt.Println("用法: go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 0  # 或 1")
 		return
 	}
 
