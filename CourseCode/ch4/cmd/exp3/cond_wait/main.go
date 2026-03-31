@@ -57,6 +57,5 @@ func main() {
 	npcRestock(npc, 3)
 
 	wg.Wait()
-	fmt.Println("[结论] Wait 会先释放锁再休眠，被唤醒后重新抢锁并用 for 再次检查条件。")
-	fmt.Println("[关键点] 即使出现虚假唤醒，for 也会把错误唤醒重新挡回去。")
+	fmt.Println("[提示] 注意 Wait 前后的日志顺序，以及玩家被叫醒后还会再次检查库存。")
 }

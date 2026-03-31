@@ -58,7 +58,5 @@ func main() {
 	}
 
 	fmt.Printf("[统计] 成功领取人数 = %d\n", successCount)
-	if successCount == 1 {
-		fmt.Println("[结论] Mutex 把临界区串行化后，唯一性约束恢复正确。")
-	}
+	fmt.Println("[提示] 对照无锁版的多轮统计，观察这里是否还能出现重复掉落。")
 }

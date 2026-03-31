@@ -49,6 +49,7 @@ cmd/
   - `go run ./cmd/exp3/TCP_reliable/server.go`
   - `go run ./cmd/exp3/TCP_reliable/player1.go`
   - `go run ./cmd/exp3/TCP_reliable/player2.go`
+  - `TCP_reliable` 为三终端配合演示：服务器显示战场网格，玩家1 负责攻击，玩家2 负责断线与重连，用于展示“旧连接内传输可靠”与“新连接状态未恢复”是两件不同的事。
   
 - exp4:
   - `go run ./cmd/exp4/p2p_lockstep_host`

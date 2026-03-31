@@ -52,6 +52,5 @@ func main() {
 	npc.mu.Unlock()
 
 	wg.Wait()
-	fmt.Println("[结论] 问题不是锁不安全，而是“没有东西时还在疯狂轮询”。")
-	fmt.Println("[下一步] 运行 cond_wait 版本，观察等待者如何真正睡眠并被唤醒。")
+	fmt.Println("[提示] 再运行 cond_wait 版本，对比等待中的玩家是否还会继续空转。")
 }

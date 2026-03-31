@@ -25,7 +25,7 @@ ch3/
     ├── exp3/game_sticky_packets/       # ③ 粘包灾难版（游戏演示）
     ├── exp3/step3_sticky_packets/      # ③ 粘包灾难版（纯文本）
     ├── exp3/step3_framing_demo/        # ③ 长度前缀+JSON 正确处理
-    ├── exp3/TCP_reliable/              # ③ TCP 可靠性演示（server/player1/player2）
+    ├── exp3/TCP_reliable/              # ③ TCP 可靠性与断线重连状态冲突演示（server/player1/player2）
     ├── exp4/p2p_lockstep_host/         # ④ P2P 锁步 Host
     ├── exp4/p2p_lockstep_client/       # ④ P2P 锁步 Client
     ├── exp5/cs_blocking_server/        # ⑤ 阻塞服务器（对照组）
@@ -157,7 +157,7 @@ go run ./cmd/exp3/step3_framing_demo/client.go
 
 **现象**：即使连续发送消息，服务端仍能按条稳定解包并逐条打印。
 
-#### 演示 4：TCP_reliable（三个终端，重连状态冲突演示）
+#### 演示 4：TCP_reliable（三个终端，游戏化重连状态冲突演示）
 
 ```powershell
 # 终端1：服务器
@@ -171,8 +171,10 @@ go run ./cmd/exp3/TCP_reliable/player2.go
 ```
 
 **观察点**：
-1. 玩家1会收到“Player2 DEAD”状态广播。
-2. 玩家2断线后重连，服务端会检测到“新连接”，并打印状态冲突提示（用于讲解仅靠 TCP 连接可靠性不足以保证游戏状态一致性）。
+1. `server.go` 会以战场网格显示双方位置：玩家1 为 `1`，玩家2 为 `2`，服务器判死后显示为 `X`。
+2. `player1.go` 会显示攻击方视角，自动等待玩家2上线并发送攻击，随后收到 `STATE: Player2 DEAD`。
+3. `player2.go` 会先断开旧连接，再在按回车后使用新连接重返场景，本地界面仍显示 `100` 血。
+4. 实验最终展示的是：玩家1所在旧连接中的字节流可靠送达，但玩家2重连后若没有会话恢复与状态同步，仍会出现“服务器判死、客户端满血”的状态冲突。
 
 ---
 

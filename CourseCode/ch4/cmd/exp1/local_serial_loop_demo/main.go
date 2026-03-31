@@ -72,10 +72,9 @@ func runFrameSingle(
 }
 
 func main() {
-	fmt.Println("=== 实验一：突破单线程瓶颈 / 单线程阻塞版 ===")
+	fmt.Println("=== 实验一：突破单线程瓶颈 / 本地串行主循环版 ===")
 	fmt.Println("场景: 4 名玩家同时上报输入，玩家4 处于“地铁断流”环境，延迟固定 500ms。")
-	fmt.Println("目标: 先观察单线程主循环为什么会把慢玩家的延迟传染给整帧。")
-	fmt.Println("成功标准: 本帧耗时明显超过 523ms，并出现“流畅玩家也被拖累”的现象。")
+	fmt.Println("目标: 观察单线程主循环为什么会把慢玩家的延迟传染给整帧。")
 
 	positions := map[int]int{1: 2, 2: 6, 3: 10, 4: 14}
 
@@ -95,6 +94,5 @@ func main() {
 	}
 	runFrameSingle(2, []int{4, 1, 2, 3}, frame2, positions, 523*time.Millisecond, true)
 
-	fmt.Println("\n[结论] 单线程模型中，只要收包顺序里混入慢连接，整帧就会被一起拖慢。")
-	fmt.Println("[下一步] 运行 goroutine 版本，对比“主逻辑解耦后谁还会被拖住”。")
+	fmt.Println("\n[提示] 再运行 network_serial_server_demo、network_goroutine_server_demo 或 network_event_driven_sync_demo，对比不同层次的解耦方式。")
 }

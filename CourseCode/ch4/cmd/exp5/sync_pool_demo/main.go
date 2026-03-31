@@ -119,6 +119,6 @@ func main() {
 	wg.Wait()
 	printPercentiles("优化：+sync.Pool (复用 10KB 缓冲)", latenciesWithPool, m2, t2)
 
-	fmt.Println("\n[结论] sync.Pool 不保证每次都命中，但通常能明显减少分配和 GC 压力。")
-	fmt.Println("[扩展] 真正的数据库连接池属于另一类资源池，本章只做概念说明，不接真实 DB。")
+	fmt.Println("\n[提示] 重点对比两组结果里的 Mallocs、GC 次数和 P99.9 延迟。")
+	fmt.Println("[扩展] 真正的数据库连接池属于另一类资源池，本章只做对象池演示。")
 }

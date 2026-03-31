@@ -11,48 +11,61 @@ var (
 	rw   sync.RWMutex
 )
 
-func Reader(id int, wg *sync.WaitGroup) {
+func formatMS(d time.Duration) string {
+	return fmt.Sprintf("%.1fms", float64(d.Microseconds())/1000.0)
+}
+
+func Reader(name string, hold time.Duration, base time.Time, wg *sync.WaitGroup) {
 	defer wg.Done()
 
+	arrive := time.Now()
+	fmt.Printf("[%s][读者 %s] 尝试获取读锁\n", formatMS(time.Since(base)), name)
 	rw.RLock()
-	fmt.Printf("[读者 %d]  进入阅览室，读取数据: %d\n", id, data["key"])
-	time.Sleep(1 * time.Second)
-	fmt.Printf("[读者 %d] 退出阅览室\n", id)
+	fmt.Printf("[%s][读者 %s] 获取读锁成功，等待了 %s，读取数据: %d\n",
+		formatMS(time.Since(base)), name, formatMS(time.Since(arrive)), data["key"])
+	time.Sleep(hold)
+	fmt.Printf("[%s][读者 %s] 释放读锁\n", formatMS(time.Since(base)), name)
 	rw.RUnlock()
 }
 
-func Writer(val int, wg *sync.WaitGroup) {
+func Writer(name string, val int, hold time.Duration, base time.Time, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	fmt.Printf("【写者】  尝试获取写锁，等待其他人离开...\n")
+	arrive := time.Now()
+	fmt.Printf("[%s][写者 %s] 尝试获取写锁\n", formatMS(time.Since(base)), name)
 	rw.Lock()
-	fmt.Printf("【写者】  已清场！独占阅览室，开始写入数据: %d\n", val)
-	time.Sleep(2 * time.Second)
+	fmt.Printf("[%s][写者 %s] 获取写锁成功，等待了 %s，开始写入数据: %d\n",
+		formatMS(time.Since(base)), name, formatMS(time.Since(arrive)), val)
+	time.Sleep(hold)
 	data["key"] = val
-	fmt.Printf("【写者】  写入完成，开放阅览室\n")
+	fmt.Printf("[%s][写者 %s] 写入完成，准备释放写锁\n", formatMS(time.Since(base)), name)
 	rw.Unlock()
 }
 
 func main() {
 	fmt.Println("=== 实验四：锁的进阶技巧与粒度优化 / RWMutex ===")
-	fmt.Println("目标: 观察“读多写少”场景下，多个读者并发进入，而写者仍保持独占。")
+	fmt.Println("目标: 观察读者并发、写者独占，以及“写者排队后/写入期间到来的读者”都会被阻塞。")
 	var wg sync.WaitGroup
+	base := time.Now()
 
-	for i := 1; i <= 3; i++ {
-		wg.Add(1)
-		go Reader(i, &wg)
-	}
-
-	time.Sleep(200 * time.Millisecond)
 	wg.Add(1)
-	go Writer(999, &wg)
+	go Reader("R1", 1200*time.Millisecond, base, &wg)
 
-	time.Sleep(200 * time.Millisecond)
-	for i := 4; i <= 5; i++ {
-		wg.Add(1)
-		go Reader(i, &wg)
-	}
+	wg.Add(1)
+	go Reader("R2", 1200*time.Millisecond, base, &wg)
+
+	time.Sleep(100 * time.Millisecond)
+	wg.Add(1)
+	go Writer("W1", 999, 1*time.Second, base, &wg)
+
+	time.Sleep(150 * time.Millisecond)
+	wg.Add(1)
+	go Reader("R3(写者排队后到达)", 400*time.Millisecond, base, &wg)
+
+	time.Sleep(1500 * time.Millisecond)
+	wg.Add(1)
+	go Reader("R4(写入进行中到达)", 400*time.Millisecond, base, &wg)
 
 	wg.Wait()
-	fmt.Println("[结论] RWMutex 让“读”具备并发性，但只要有写者排队，后续读者也必须让路。")
+	fmt.Println("[提示] 重点看 R3 和 R4 的“尝试获取读锁”与“真正拿到读锁”之间的等待时间。")
 }
