@@ -23,12 +23,19 @@ func main() {
 	defer conn.Close()
 	fmt.Println("=== zombie 单线程客户端(断网演示) ===")
 	fmt.Println("连接到", host+":9107")
-	fmt.Println("输入: w/a/s/d 移动, j攻击, q退出, t模拟断网 (回车发送)")
 
 	reader := bufio.NewReader(os.Stdin)
+	// 初始渲染：等待服务端在两位玩家就绪后下发首帧
+	var initWS ch3proto.WorldState
+	if err := ch3proto.RecvJSON(conn, &initWS); err != nil {
+		fmt.Println("recv init err:", err)
+		return
+	}
+	fmt.Print(ch3render.FormatWorldState(initWS, 20, 10))
+	fmt.Print("\r\n")
 	disconnected := false
 	for {
-		fmt.Print("action> ")
+		fmt.Print("输入: w/a/s/d 移动, j攻击, q退出, t模拟断网 (回车发送)|action> ")
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Println("read input err:", err)

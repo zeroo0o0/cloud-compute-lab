@@ -2,7 +2,6 @@ package main
 
 import (
 	"ch3/internal/ch3proto"
-	"ch3/internal/ch3render"
 	"fmt"
 	"math"
 	"net"
@@ -110,8 +109,6 @@ func broadcast(state ch3proto.WorldState) {
 		}
 		_ = ch3proto.SendJSON(p.conn, state)
 	}
-	fmt.Print(ch3render.FormatWorldState(state, mapW, mapH))
-	fmt.Print("\r\n")
 }
 
 func main() {
@@ -134,6 +131,8 @@ func main() {
 		fmt.Printf("[server] player#%d connected from %s\n", id, conn.RemoteAddr())
 	}
 	fmt.Println("[server] 全员就绪，进入单线程阻塞循环")
+	// 初始渲染：在主循环开始前先广播一帧初始状态
+	broadcast(makeSnapshot("init"))
 
 	for frame < 10000 {
 		for i, p := range players {
