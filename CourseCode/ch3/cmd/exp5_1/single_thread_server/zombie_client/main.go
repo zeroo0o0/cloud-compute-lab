@@ -29,6 +29,7 @@ type cfg struct {
 }
 
 func main() {
+	// 阶段1：初始化配置并建立连接
 	c := parseArgs(os.Args)
 
 	conn, err := net.Dial("tcp", c.host+":9107")
@@ -41,6 +42,7 @@ func main() {
 	fmt.Printf("role=%d, blackholeAt=%d, blackholeDur=%d\n", c.role, c.blackholeAt, c.blackholeDur)
 	fmt.Println("输入 t + 回车 可随时切换断网模拟")
 
+	// 阶段2：等待服务端首帧（双方连接完成后的 init 状态）
 	// 初始渲染：服务端要等两位玩家都连接才会下发首帧，因此这里不能设置短超时。
 	fmt.Println("等待另一名玩家连接后开始...")
 	var initWS ch3proto.WorldState
@@ -51,6 +53,7 @@ func main() {
 	renderFrame(initWS, 0, false, "connected")
 	fmt.Println("tick sync mode: driven by server frame")
 
+	// 阶段3：启动输入读取通道（w/a/s/d/j/t）
 	inputCh := make(chan string, 8)
 	go readInputLoop(inputCh)
 
@@ -65,6 +68,7 @@ func main() {
 	for {
 		tickNo++
 
+		// 阶段4：读取并解析本地输入（动作输入或断网开关）
 		select {
 		case line := <-inputCh:
 			action, toggled, ok := parseInput(line)
@@ -95,11 +99,13 @@ func main() {
 			lastStatus = "simulate disconnect: OFF (scheduled resume)"
 		}
 
+		// 阶段5：若处于断网模拟，跳过收发（仅本地等待）
 		if blackhole {
 			time.Sleep(sendTick)
 			continue
 		}
 
+		// 阶段6：基于服务端 frame 计算下一帧并发送输入（无输入则发 idle）
 		nextFrame := lastFrame + 1
 		if nextFrame > lastSentFrame {
 			action := pendingAction
@@ -111,6 +117,7 @@ func main() {
 			lastSentFrame = nextFrame
 		}
 
+		// 阶段7：接收服务端广播状态（带超时）
 		_ = conn.SetReadDeadline(time.Now().Add(recvTimeout))
 		var ws ch3proto.WorldState
 		if err := ch3proto.RecvJSON(conn, &ws); err != nil {
@@ -127,6 +134,7 @@ func main() {
 		_ = conn.SetReadDeadline(time.Time{})
 		timeoutCount = 0
 
+		// 阶段8：更新本地帧进度并按策略渲染
 		if ws.Frame <= lastFrame {
 			continue
 		}

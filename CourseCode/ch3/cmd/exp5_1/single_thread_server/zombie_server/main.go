@@ -112,6 +112,7 @@ func broadcast(state ch3proto.WorldState) {
 }
 
 func main() {
+	// 阶段1：启动监听并等待客户端连接
 	ln, err := net.Listen("tcp", ":9107")
 	if err != nil {
 		panic(err)
@@ -131,10 +132,13 @@ func main() {
 		fmt.Printf("[server] player#%d connected from %s\n", id, conn.RemoteAddr())
 	}
 	fmt.Println("[server] 全员就绪，进入单线程阻塞循环")
-	// 初始渲染：在主循环开始前先广播一帧初始状态
+
+	// 阶段2：广播首帧（init），让客户端进入游戏画面
 	broadcast(makeSnapshot("init"))
 
+	// 阶段3：单线程主循环（等待输入 -> 计算 -> 广播）
 	for frame < 10000 {
+		// 阶段3.1：按玩家顺序阻塞读取输入（这是本实验的关键阻塞点）
 		for i, p := range players {
 			if !p.online {
 				inputs[i] = ch3proto.InputMsg{}
@@ -158,8 +162,13 @@ func main() {
 			inputs[i] = msg
 		}
 
+		// 阶段3.2：用本帧输入推进状态
 		event := update()
+
+		// 阶段3.3：向所有在线玩家广播最新状态
 		broadcast(makeSnapshot(event))
+
+		// 阶段3.4：固定节奏等待，进入下一帧
 		time.Sleep(tickRate)
 	}
 	fmt.Println("[server] 演示结束 (10000帧)")
