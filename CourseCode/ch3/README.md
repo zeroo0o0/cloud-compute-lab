@@ -87,6 +87,8 @@ go build ./...
 
 **知识点**：Game Loop（输入 → 计算 → 渲染）
 
+**PPT** ：28页，单机本地游戏
+
 **核心函数**：`readInput()` → `updateState()` → `render()`
 
 ```powershell
@@ -104,6 +106,8 @@ go run ./cmd/exp1/loop
 
 **知识点**：`net.Listen` (绑定 `0.0.0.0` 通配 IP) / `listener.Accept()` / `net.Dial` / `conn.Write` / `conn.Read` / 长连接与终端交互 (`bufio.Scanner`)
 
+**PPT** ：39页的Socket通信程序演示
+
 #### 单机运行（两个终端）
 
 ```powershell
@@ -114,7 +118,9 @@ go run ./cmd/exp2/socket_server
 go run ./cmd/exp2/socket_client
 # 提示输入 IP 时，直接按回车键（系统将默认连接本机 127.0.0.1:8888）
 ```
+
 #### 多机运行（两个终端）
+
 ```powershell
 # 机器A（服务器 / 教师端）
 go run ./cmd/exp2/socket_server               # 默认监听 :8888，自动开放给整个局域网
@@ -134,6 +140,7 @@ go run ./cmd/exp2/socket_client
 **核心函数**：`sendJSON()` / `recvJSON()`（长度前缀拆包）；`net.Listen` + `listener.Accept`（连接管理）；`conn.Read` / `conn.Write`（演示断线广播与重连后的状态不一致问题）
 
 #### 演示顺序（建议按 1 → 2 → 3）
+
 #### 演示 1：游戏化粘包现象（自动单机）
 
 ```powershell
@@ -153,16 +160,19 @@ go run ./cmd/exp3/step3_sticky_packets/client.go
 ```
 
 在mac系统中，可以通过如下命令来关闭回环网卡从而模拟网络故障：
+
 ```shell
 sudo ifconfig lo0 down
 ```
 
 通过下面的命令恢复：
+
 ```shell
 sudo ifconfig lo0 up
 ```
 
 检验回环网卡是否关闭：
+
 ```shell
 ping 127.0.0.1
 ```
@@ -193,6 +203,7 @@ go run ./cmd/exp3/TCP_reliable/player2.go
 ```
 
 **观察点**：
+
 1. `server.go` 会以战场网格显示双方位置：玩家1 为 `1`，玩家2 为 `2`，服务器判死后显示为 `X`。
 2. `player1.go` 会显示攻击方视角，自动等待玩家2上线并发送攻击，随后收到 `STATE: Player2 DEAD`。
 3. `player2.go` 会先断开旧连接，再在按回车后使用新连接重返场景，本地界面仍显示 `100` 血。
@@ -203,6 +214,8 @@ go run ./cmd/exp3/TCP_reliable/player2.go
 ### Step 4 — P2P 确定性帧同步双人网游
 
 **知识点**：锁步循环（Lockstep）—— 发完输入必须阻塞等对方；`DeterministicUpdate()` 保证双方独立计算结果一致。
+
+**PPT** ：49页的确定性帧同步-P2P极简双人网游
 
 **核心函数**：`ch3game.DeterministicUpdate(state, local, remote, isHost)` — 根据 `isHost` 区分本地/远程输入，用 `dist <= 1` 判定命中扣血；任一方 `HP <= 0` 时结束游戏。
 
@@ -234,6 +247,7 @@ go run ./cmd/exp4/p2p_lockstep_client 192.168.x.x
 ```
 
 **操作**：双方轮流输入 `w/a/s/d/j`，观察：
+
 1. 一方未输入时另一方阻塞（锁步）
 2. 两边输出的 `state` 完全一致（确定性）
 3. 当双方距离小于等于 1 时，按 `j` 可攻击，对方 HP 下降
@@ -251,6 +265,8 @@ go run ./cmd/exp4/p2p_lockstep_client 192.168.x.x
 ### Step 5 — C/S 架构下的并发连接管理
 
 **知识点**：单线程阻塞 vs `go handleClient()` 并发处理
+
+**PPT** ：55-56页的服务器同时与多端通信的连接管理
 
 **规则说明**：
 
@@ -304,6 +320,7 @@ go run ./cmd/exp5/cs_client 127.0.0.1 9106
 服务器在一台机器运行，客户端改为 `go run ./cmd/exp5/cs_client <服务器IP> 9106`。
 
 > 说明：
+>
 > - `9105` 是“阻塞服务器对照组”，设计目标就是让你观察“一个客户端占住服务端时，其它客户端只能排队”。
 
 ---
@@ -311,6 +328,8 @@ go run ./cmd/exp5/cs_client 127.0.0.1 9106
 ### Step 5.1 — TCP 半开连接（僵尸玩家）对游戏的影响
 
 **知识点**：本步骤重点是 **read 阻塞对单线程主循环的影响**。在单线程服务器中，主循环会按玩家顺序执行 `RecvJSON`；只要其中一个连接读不到数据，主循环就会阻塞，后续 `update()` 与 `broadcast()` 都无法推进。
+
+**PPT** ：对应PPT中的63页的TCP半开连接-僵尸玩家
 
 > 多线程版（`multi_thread_server`）目前仍在测试中，后续补充完整说明。
 
@@ -352,6 +371,8 @@ go run ./cmd/exp5_1/single_thread_server/zombie_client 127.0.0.1
 ### Step 6 — 权威服务器游戏原型
 
 **知识点**：服务器是唯一真相持有者——客户端只发输入、只渲染；`update()` + `broadcast()` 在服务端执行。
+
+**PPT** ：CS架构的多人网游原型
 
 **输入方式**：客户端已改为 **raw 模式单键输入**，无需回车。
 
@@ -396,21 +417,23 @@ go run ./cmd/exp6/authoritative_client 192.168.x.x
 
 **知识点**：`ReliableConn` 封装 `SetReadDeadline` 实现超时非阻塞收包；主循环继续运行。
 
-本步骤重点验证三件事：
+**PPT** ： 对应于PPT中的67-68页，健壮网络通信下的游戏实现。
+
+本实验主要优化两点：
+
 1. 使用长度前缀 + JSON，避免 TCP 粘包/半包导致的反序列化错位。
 
 2. 客户端与服务器都采用超时读取，超时时本帧按“无输入/无新状态”处理，循环继续。
 
 > 说明：**多线程版本目前仍在测试中**，README 暂时仅展示单线程版的运行与说明，待测试完成后再补充多线程细节。
 
-**输入方式**：客户端也已改为 **raw 模式单键输入**，无需回车。
+**输入方式**：客户端为命令行输入，输入后按回车发送。
 
 - `w/a/s/d`：移动
 - `j`：攻击
 - `q`：主动退出客户端
-- `t`：切换“本地丢帧模拟”（客户端主动跳过部分收包）
+- `t`：切换“本地断网模拟”（客户端不收包也不发包）
 - `p`：切换“防粘包开关”（ON=长度前缀正确解析，OFF=模拟无边界解析）
-- `u`：触发“突发发送测试”（客户端一次性快速发送多条输入消息）
 
 **核心结构**（见 `internal/ch3net/ch3net.go`）：
 
@@ -421,7 +444,7 @@ type ReliableConn struct {
 }
 func (rc *ReliableConn) Send(v any) error
 func (rc *ReliableConn) SendTimeout(timeout time.Duration, v any) error
-func (rc *ReliableConn) Recv(timeout, out) error
+func (rc *ReliableConn) Recv(timeout time.Duration, out any) error
 ```
 
 #### 单机运行（3个终端）
@@ -431,11 +454,34 @@ func (rc *ReliableConn) Recv(timeout, out) error
 go run ./cmd/exp7/single_thread/reliable_server
 
 # 终端2 — 客户端1
-go run ./cmd/exp7/single_thread/reliable_client 127.0.0.1 0
+go run ./cmd/exp7/single_thread/reliable_client 127.0.0.1
 
 # 终端3 — 客户端2
-go run ./cmd/exp7/single_thread/reliable_client 127.0.0.1 1
+go run ./cmd/exp7/single_thread/reliable_client 127.0.0.1
 ```
+
+#### 演示步骤（重点）
+
+1. **基线验证（正常收发）**
+    - 两个客户端都连上后，分别输入 `w/a/s/d/j`（回车发送）。
+    - 现象：服务端持续推进帧并广播，两个客户端都能看到状态更新。
+
+2. **断网演示：证明“断网后服务器不阻塞”**
+    - 在客户端A输入 `t`，出现 `simulate disconnect: ON (no send/recv)`。
+    - 此时在客户端B继续输入 `w/a/s/d/j`。
+    - 现象：客户端B仍能持续收到新状态，服务端不会因为A断网而卡死。
+    - 原因：服务端 `Recv(timeout)` 超时后会把该玩家输入当作 `idle`，主循环继续。
+    - 再在客户端A输入 `t` 恢复，A恢复正常收发。
+
+3. **粘包演示：错误与正确对比**
+    - 在客户端A输入 `p` 打开粘包演示。
+    - 现象：A端会进入 raw 读模式，可能打印 `raw read failed (likely粘包)`；这是故意不用长度前缀解包导致的粘包/连包解析失败。
+    - 客户端B保持默认模式继续操作，可稳定收帧。
+    - 再在客户端A输入 `p` 关闭粘包演示，客户端A会自动重连并恢复到 `ReliableConn + RecvJSON` 的正确拆包模式。
+
+4. **历史帧处理演示（可选）**
+    - 在网络抖动或短暂堆积时，客户端默认只渲染最新帧（按 `Frame` 号取最新）。
+    - 现象：不会回放大量旧帧刷屏，画面会直接追上当前状态。
 
 #### 多机运行
 
@@ -444,10 +490,8 @@ go run ./cmd/exp7/single_thread/reliable_client 127.0.0.1 1
 go run ./cmd/exp7/single_thread/reliable_server  # 监听 :9108
 
 # 机器B/C
-go run ./cmd/exp7/single_thread/reliable_client 192.168.x.x 0
+go run ./cmd/exp7/single_thread/reliable_client 192.168.x.x
 ```
-
-
 
 ---
 
