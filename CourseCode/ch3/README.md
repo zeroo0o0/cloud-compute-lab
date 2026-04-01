@@ -310,54 +310,40 @@ go run ./cmd/exp5/cs_client 127.0.0.1 9106
 
 ### Step 5.1 — TCP 半开连接（僵尸玩家）对游戏的影响
 
-**知识点**：TCP 半开连接（Half-Open）/ 僵尸连接：客户端“断网但不关进程”时，服务端可能既收不到数据也收不到断开通知，导致连接槽位长期被占用。
+**知识点**：本步骤重点是 **read 阻塞对单线程主循环的影响**。在单线程服务器中，主循环会按玩家顺序执行 `RecvJSON`；只要其中一个连接读不到数据，主循环就会阻塞，后续 `update()` 与 `broadcast()` 都无法推进。
 
-本实验分为两个版本：
-
-1. **单线程版**（`single_thread_server`）：服务器采用 select 事件循环，不再锁步等待；谁有数据就先处理谁，并按固定 tick 广播。blackhole 玩家保持半开连接占住槽位，第三个客户端无法加入；另一个正常玩家仍可继续交互。
-2. **多线程版**（`multi_thread_server`）：保留原有 `read-block` 场景。每个连接单独 recv 协程阻塞读；僵尸玩家断网但不发 FIN 时会长期占住槽位，第三个玩家无法进入，但另一个活跃玩家仍可继续游戏。
+> 多线程版（`multi_thread_server`）目前仍在测试中，后续补充完整说明。
 
 #### 单线程版运行（3个终端）
 
 ```powershell
-# 终端1 — 单线程服务器（:9110）
+# 终端1 — 单线程服务器（:9107）
 go run ./cmd/exp5_1/single_thread_server/zombie_server
 
 # 终端2 — 客户端 P0
-go run ./cmd/exp5_1/single_thread_server/zombie_client 127.0.0.1 0
+go run ./cmd/exp5_1/single_thread_server/zombie_client 127.0.0.1
 
 # 终端3 — 客户端 P1
-go run ./cmd/exp5_1/single_thread_server/zombie_client 127.0.0.1 1
+go run ./cmd/exp5_1/single_thread_server/zombie_client 127.0.0.1
 ```
 
-#### 多线程版运行（4个终端，建议）
+单线程版流程是：
 
-```powershell
-# 终端1 — 服务器（:9110）
-go run ./cmd/exp5_1/multi_thread_server/zombie_server
-
-# 终端2 — 客户端 P0
-go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 0
-
-# 终端3 — 客户端 P1
-go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 1
-
-# 终端4 — 第三个玩家（用于观察“无法进入房间”）
-go run ./cmd/exp5_1/multi_thread_server/zombie_client 127.0.0.1 0
-```
+1. 两名玩家连接完成后，服务器先广播一帧 `init`。
+2. 进入主循环后，按顺序对 `player0 -> player1` 做阻塞 `RecvJSON`。
+3. 只有两边输入都读到后，才会执行一次 `update()` 并 `broadcast()`。
+4. 因此该版本本质是“收齐双方输入再推进一帧”的确定性帧同步，不是固定 tick 独立广播模型。
 
 #### 演示操作
 
-1. 两个客户端先正常操作，确认可同步移动/攻击。
-2. 让 **任意一个客户端（P0 或 P1）** 按 **`t`** 切换 `blackhole`（模拟断网/半开）：保持 TCP 连接不关闭，但不收包也不发包；槽位仍被占用，第三个客户端无法进入。
-3. 观察单线程版：
-    - 服务器 select 只会处理有数据的连接，另一个正常玩家仍可输入并看到状态广播。
-    - 僵尸玩家连接不释放，房间满员；按 `q` 退出后槽位释放，第三个客户端可再加入。
-4. 观察多线程 `read-block` 版：
-    - 僵尸玩家对应连接会长期卡在 `RecvJSON/read` 等待，CPU 占用仍较低（阻塞等待）。
-    - 客户端2（正常玩家）仍可继续移动/攻击，不会被客户端1的断网直接拖死。
-    - 如果客户端1是“半开僵尸”（不发不收且不关闭连接），此时启动第 3 个客户端会收到 `ROOM FULL`（槽位被僵尸占住）。
-    - 如果客户端1是“正常退出”（按 `q` 或进程结束并关闭连接），该槽位会被释放，第 3 个客户端可成功加入并复用该槽位。
+1. 两个客户端先正常操作：
+    每个客户端输入后，都会等待服务器返回新状态；服务器必须收齐双方输入才推进下一帧，所以表现为“你一步、我一步”的确定性锁步。
+2. 在任意一端客户端按 `t`（`simulate disconnect: ON`）：
+    该客户端进入“不发不收”状态。根据 `zombie_client/main.go`，此时输入会被本地忽略，不再调用 `SendJSON`/`RecvJSON`。
+3. 观察现象：
+    服务器在主循环的 `RecvJSON` 处等待该断网客户端输入，整个主循环被阻塞；另一名正常玩家也无法继续获得新帧，体感就是输入卡住、对局停滞。
+4. 再次按 `t` 恢复（`simulate disconnect: OFF`）：
+    客户端恢复收发，服务器可重新收齐双方输入，主循环继续推进，游戏恢复正常。
 
 > 备注：本实验为了复现现象，刻意不加心跳/读超时；对照 Step7 的 `ReliableConn` 可进一步讲“如何用 timeout/重连避免僵尸玩家拖死房间”。
 
