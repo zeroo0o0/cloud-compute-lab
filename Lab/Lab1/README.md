@@ -118,7 +118,7 @@ defer raw.Close()
 
 ### 任务 A：实现网络消息收发（`student/protocol/message.go`）
 
-#### A-1  `Send(msg Message) error`　　**（3 分）**
+#### A-1  `Send(msg Message) error`　　**（2 分）**
 
 **功能**：将 `msg` 序列化为 JSON，通过 TCP 连接发送给对端。
 
@@ -134,7 +134,7 @@ func (c *Conn) Send(msg Message) error {
 }
 ```
 
-#### A-2  `Receive() (Message, error)`　　**（3 分）**
+#### A-2  `Receive() (Message, error)`　　**（2 分）**
 
 **功能**：从 TCP 连接阻塞读取一条 JSON 消息并返回。
 
