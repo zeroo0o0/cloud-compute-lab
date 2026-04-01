@@ -25,69 +25,83 @@ const (
 )
 
 func main() {
-    ln, err := net.Listen("tcp", addr)
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "监听失败: %v\n", err)
-        os.Exit(1)
-    }
-    defer ln.Close()
-    fmt.Printf("🎮 BattleWorld 服务器启动，监听 %s\n等待 %d 名玩家...\n\n", addr, numPlayers)
+	// ╔═════════════════════════════════════════════════════════════════════════╗
+	// ║  任务 C-1：启动 TCP 监听                                               ║
+	// ║                                                                         ║
+	// ║  功能：在指定地址上开启 TCP 监听，等待客户端连接。                      ║
+	// ║                                                                         ║
+	// ║  实现要点：                                                             ║
+	// ║    调用 net.Listen("tcp", addr)，将返回值存入 ln 和 err。               ║
+	// ║    若 err != nil，向 os.Stderr 打印错误信息后 os.Exit(1)。              ║
+	// ║    使用 defer ln.Close() 确保程序退出时关闭监听器。                     ║
+	// ║                                                                         ║
+	// ║  提示框架：                                                             ║
+	// ║    ln, err := net.Listen(???, ???)                                      ║
+	// ║    if err != nil { ... }                                                ║
+	// ║    defer ln.Close()                                                     ║
+	// ╚═════════════════════════════════════════════════════════════════════════╝
 
-    // 修复点 1：使用长度为 0、容量为 numPlayers 的动态切片，而不是提前分配满长度。
-    // 这样只有 append 成功时，玩家数量才会增加。
-    players := make([]*game.Player, 0, numPlayers)
+	// TODO C-1: 在此处启动 TCP 监听
+	panic("C-1 尚未实现：请完成 net.Listen 调用")
 
-    // 修复点 2：循环条件改为基于已成功连接的合法玩家数量，而不是固定的迭代次数。
-    for len(players) < numPlayers {
-        i := len(players) // 当前正在分配的玩家索引 (0 或 1)
+	fmt.Printf("🎮 BattleWorld 服务器启动，监听 %s\n等待 %d 名玩家...\n\n", addr, numPlayers)
 
-        raw, err := ln.Accept()
-        if err != nil {
-            fmt.Fprintf(os.Stderr, "接受连接失败: %v\n", err)
-            // 如果 Accept 失败，底层的 raw connection 通常是 nil，直接重试即可。
-            continue
-        }
-        
-        conn := protocol.NewConn(raw)
+	players := make([]*game.Player, 0, numPlayers)
 
-        // 客户端第一条消息：TypeJoin，Text 字段为玩家名
-        msg, err := conn.Receive()
-        if err != nil || msg.Type != protocol.TypeJoin {
-            fmt.Fprintf(os.Stderr, "等待 join 消息失败: %v\n", err)
-            // 彻底释放这个非法连接的句柄
-            conn.Close() 
-            // 阻断异常，继续等待，且此时 len(players) 不会增加，完美实现容错
-            continue
-        }
+	for len(players) < numPlayers {
+		i := len(players)
 
-        name := msg.Text
-        if name == "" {
-            name = fmt.Sprintf("玩家%d", i+1)
-        }
+		// ╔═════════════════════════════════════════════════════════════════════════╗
+		// ║  任务 C-2：接受客户端连接                                             ║
+		// ║                                                                         ║
+		// ║  功能：从监听器接受一个新的 TCP 连接。                                  ║
+		// ║                                                                         ║
+		// ║  实现要点：                                                             ║
+		// ║    调用 ln.Accept()，将返回值存入 raw 和 err。                          ║
+		// ║    若 err != nil，打印错误后 continue（跳过本次，继续等待下一个连接）。  ║
+		// ║                                                                         ║
+		// ║  提示框架：                                                             ║
+		// ║    raw, err := ln.Accept()                                              ║
+		// ║    if err != nil { ...; continue }                                      ║
+		// ╚═════════════════════════════════════════════════════════════════════════╝
 
-        // 玩家 0 在左上角，玩家 1 在右下角
-        startX, startY := 0, 0
-        if i == 1 {
-            startX = protocol.MapWidth - 1
-            startY = protocol.MapHeight - 1
-        }
+		// TODO C-2: 在此处接受客户端连接
+		panic("C-2 尚未实现：请完成 ln.Accept() 调用")
 
-        // 只有完整通过了前面的协议验证安全门，才真正实例化 Player 并加入切片
-        p := game.NewPlayer(i+1, name, startX, startY, conn)
-        players = append(players, p)
-        
-        fmt.Printf("✅ 玩家 %d [%s] 已连接 → 起始位置 (%d,%d)\n", i+1, name, startX, startY)
+		conn := protocol.NewConn(raw)
 
-        // 向新玩家发送初始化消息（含其 ID）
-        conn.Send(protocol.Message{
-            Type:   protocol.TypeInit,
-            YourID: i + 1,
-            Text:   fmt.Sprintf("欢迎，%s！等待对手...", name),
-        })
-    }
+		msg, err := conn.Receive()
+		if err != nil || msg.Type != protocol.TypeJoin {
+			fmt.Fprintf(os.Stderr, "等待 join 消息失败: %v\n", err)
+			conn.Close()
+			continue
+		}
 
-    fmt.Println("\n🚀 双方就绪，游戏开始！\n")
-    g := game.NewGame(players[0], players[1])
-    g.Run()
-    fmt.Println("\n🏁 本局结束，服务器退出。")
+		name := msg.Text
+		if name == "" {
+			name = fmt.Sprintf("玩家%d", i+1)
+		}
+
+		startX, startY := 0, 0
+		if i == 1 {
+			startX = protocol.MapWidth - 1
+			startY = protocol.MapHeight - 1
+		}
+
+		p := game.NewPlayer(i+1, name, startX, startY, conn)
+		players = append(players, p)
+
+		fmt.Printf("✅ 玩家 %d [%s] 已连接 → 起始位置 (%d,%d)\n", i+1, name, startX, startY)
+
+		conn.Send(protocol.Message{
+			Type:   protocol.TypeInit,
+			YourID: i + 1,
+			Text:   fmt.Sprintf("欢迎，%s！等待对手...", name),
+		})
+	}
+
+	fmt.Println("\n🚀 双方就绪，游戏开始！\n")
+	g := game.NewGame(players[0], players[1])
+	g.Run()
+	fmt.Println("\n🏁 本局结束，服务器退出。")
 }

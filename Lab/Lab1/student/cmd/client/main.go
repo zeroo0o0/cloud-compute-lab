@@ -29,7 +29,7 @@ func addEvent(text string) {
 	uiMu.Lock()
 	defer uiMu.Unlock()
 	eventLog = append(eventLog, text)
-	if len(eventLog) > 6 { // 控制日志行数，适配屏幕
+	if len(eventLog) > 6 {
 		eventLog = eventLog[len(eventLog)-6:]
 	}
 }
@@ -45,12 +45,9 @@ func drawUI() {
 	defer uiMu.Unlock()
 
 	var sb strings.Builder
-	// \033[H 将光标移动到屏幕左上角
 	sb.WriteString("\033[H")
-	// \033[K 清除从光标到行尾的所有内容，防止旧字符残留
 	sb.WriteString("═══ BattleWorld 战场 (Lab1) ═══\033[K\n")
 
-	// 1. 绘制 2D 地图
 	grid := make([][]string, protocol.MapHeight)
 	for i := range grid {
 		grid[i] = make([]string, protocol.MapWidth)
@@ -62,11 +59,11 @@ func drawUI() {
 	for _, p := range latestSnapshot.Players {
 		if p.X >= 0 && p.X < protocol.MapWidth && p.Y >= 0 && p.Y < protocol.MapHeight {
 			if !p.Alive {
-				grid[p.Y][p.X] = " x " // 阵亡
+				grid[p.Y][p.X] = " x "
 			} else if p.ID == myID {
-				grid[p.Y][p.X] = " @ " // 自己
+				grid[p.Y][p.X] = " @ "
 			} else {
-				grid[p.Y][p.X] = " * " // 敌人
+				grid[p.Y][p.X] = " * "
 			}
 		}
 	}
@@ -75,10 +72,9 @@ func drawUI() {
 		for _, cell := range row {
 			sb.WriteString(cell)
 		}
-		sb.WriteString("\033[K\n") // 渲染完一行后清理右侧残留
+		sb.WriteString("\033[K\n")
 	}
 
-	// 2. 绘制玩家状态列表
 	sb.WriteString("\n─── 战场快报 ─────────────────────────────────────────\033[K\n")
 	for _, p := range latestSnapshot.Players {
 		tag := "  "
@@ -95,12 +91,10 @@ func drawUI() {
 	}
 	sb.WriteString("──────────────────────────────────────────────────────\033[K\n")
 
-	// 3. 绘制近期事件日志
 	for _, e := range eventLog {
 		sb.WriteString("📢 " + e + "\033[K\n")
 	}
 
-	// 4. 清除屏幕下方可能多余的旧数据，并渲染输入提示符
 	sb.WriteString("\033[J")
 	sb.WriteString("> \033[K")
 
@@ -125,16 +119,27 @@ func main() {
 		name = "无名勇士"
 	}
 
-	// 进入终端的 Alternate Screen Buffer
 	fmt.Print("\033[?1049h\033[2J\033[H")
 	defer fmt.Print("\033[?1049l")
 
-	raw, err := net.Dial("tcp", serverAddr)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "连接服务器失败: %v\n", err)
-		os.Exit(1)
-	}
-	defer raw.Close()
+	// ╔═════════════════════════════════════════════════════════════════════════╗
+	// ║  任务 C-3：连接服务器                                                  ║
+	// ║                                                                         ║
+	// ║  功能：通过 TCP 连接到服务器地址 serverAddr。                            ║
+	// ║                                                                         ║
+	// ║  实现要点：                                                             ║
+	// ║    调用 net.Dial("tcp", serverAddr)，将返回值存入 raw 和 err。           ║
+	// ║    若 err != nil，向 os.Stderr 打印错误信息后 os.Exit(1)。              ║
+	// ║    使用 defer raw.Close() 确保程序退出时关闭连接。                       ║
+	// ║                                                                         ║
+	// ║  提示框架：                                                             ║
+	// ║    raw, err := net.Dial(???, ???)                                        ║
+	// ║    if err != nil { ... }                                                ║
+	// ║    defer raw.Close()                                                    ║
+	// ╚═════════════════════════════════════════════════════════════════════════╝
+
+	// TODO C-3: 在此处连接服务器
+	panic("C-3 尚未实现：请完成 net.Dial 调用")
 
 	conn := protocol.NewConn(raw)
 	conn.Send(protocol.Message{Type: protocol.TypeJoin, Text: name})
@@ -144,7 +149,6 @@ func main() {
 
 	done := make(chan struct{})
 
-	// 启动独立的 Goroutine 处理网络接收流水线
 	go func() {
 		defer close(done)
 		for {
@@ -154,7 +158,6 @@ func main() {
 				drawUI()
 				return
 			}
-			// 整合 Lab1 的所有消息类型到事件日志和状态机中
 			switch msg.Type {
 			case protocol.TypeInit:
 				myID = msg.YourID
@@ -179,7 +182,6 @@ func main() {
 		}
 	}()
 
-	// 主 Goroutine 处理键盘输入流水线
 	for {
 		select {
 		case <-done:
@@ -193,7 +195,7 @@ func main() {
 		}
 		in = strings.TrimSpace(strings.ToLower(in))
 		if in == "" {
-			drawUI() // 敲击空回车时强制刷新，抹掉换行符残影
+			drawUI()
 			continue
 		}
 
@@ -223,7 +225,6 @@ func main() {
 			continue
 		}
 		conn.Send(msg)
-		// 输入有效指令后立即重绘
 		drawUI()
 	}
 }
