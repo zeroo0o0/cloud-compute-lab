@@ -183,13 +183,13 @@ func (c *Conn) Receive() (Message, error) {
 
 | 任务 | 位置 | 说明 | 分值 |
 |------|------|------|------|
-| C-1 | `cmd/server/main.go` | `net.Listen` 启动监听 | 2 分 |
-| C-2 | `cmd/server/main.go` | `ln.Accept()` 接受连接 | 2 分 |
-| C-3 | `cmd/client/main.go` | `net.Dial` 连接服务器 | 2 分 |
-| A-1 | `protocol/message.go` | `Send` 发送消息 | 3 分 |
-| A-2 | `protocol/message.go` | `Receive` 接收消息 | 3 分 |
-| B-1 | `game/game.go` | `handleMove` 移动逻辑 | 5 分 |
-| B-2 | `game/game.go` | `handleAttack` 攻击逻辑 | 5 分 |
+| C-1 | `cmd/server/main.go` | `net.Listen` 启动监听 | 4 分 |
+| C-2 | `cmd/server/main.go` | `ln.Accept()` 接受连接 | 4 分 |
+| C-3 | `cmd/client/main.go` | `net.Dial` 连接服务器 | 4 分 |
+| A-1 | `protocol/message.go` | `Send` 发送消息 | 2 分 |
+| A-2 | `protocol/message.go` | `Receive` 接收消息 | 2 分 |
+| B-1 | `game/game.go` | `handleMove` 移动逻辑 | 2 分 |
+| B-2 | `game/game.go` | `handleAttack` 攻击逻辑 | 2 分 |
 | **合计** | | | **20 分** |
 
 > 评分以自动化测试通过情况为准，每个测试用例对应若干得分点，部分正确可获得部分分数。
