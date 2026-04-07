@@ -12,11 +12,18 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
+	"unsafe"
 
 	"battleworld/protocol"
 )
 
-const serverAddr = "localhost:9000"
+const (
+	serverAddr    = "localhost:9000"
+	minTermWidth  = 70
+	minTermHeight = 32
+)
 
 // ─── 客户端全局 UI 状态 ────────────────────────────────────────────────────
 var (
@@ -29,8 +36,11 @@ var (
 func addEvent(text string) {
 	uiMu.Lock()
 	defer uiMu.Unlock()
+	if text == "" {
+		return
+	}
 	eventLog = append(eventLog, text)
-	if len(eventLog) > 6 { // 控制日志行数，适配屏幕
+	if len(eventLog) > 6 {
 		eventLog = eventLog[len(eventLog)-6:]
 	}
 }
@@ -41,17 +51,31 @@ func updateSnapshot(msg protocol.Message) {
 	latestSnapshot = msg
 }
 
+func setMyID(id int) {
+	uiMu.Lock()
+	defer uiMu.Unlock()
+	myID = id
+}
+
 func drawUI() {
 	uiMu.Lock()
 	defer uiMu.Unlock()
 
 	var sb strings.Builder
-	// \033[H 将光标移动到屏幕左上角
 	sb.WriteString("\033[H")
-	// \033[K 清除从光标到行尾的所有内容，防止旧字符残留
+
+	cols, rows, ok := getTerminalSize()
+	if ok && (cols < minTermWidth || rows < minTermHeight) {
+		sb.WriteString("═══ BattleWorld 战场 (Lab1) ═══\033[K\n")
+		sb.WriteString(fmt.Sprintf("⚠ 终端窗口过小：当前 %d×%d，至少需要 %d×%d\033[K\n", cols, rows, minTermWidth, minTermHeight))
+		sb.WriteString("请放大终端窗口后继续操作。\033[K\n")
+		sb.WriteString("\033[J")
+		fmt.Print(sb.String())
+		return
+	}
+
 	sb.WriteString("═══ BattleWorld 战场 (Lab1) ═══\033[K\n")
 
-	// 1. 绘制 2D 地图
 	grid := make([][]string, protocol.MapHeight)
 	for i := range grid {
 		grid[i] = make([]string, protocol.MapWidth)
@@ -63,11 +87,11 @@ func drawUI() {
 	for _, p := range latestSnapshot.Players {
 		if p.X >= 0 && p.X < protocol.MapWidth && p.Y >= 0 && p.Y < protocol.MapHeight {
 			if !p.Alive {
-				grid[p.Y][p.X] = " x " // 阵亡
+				grid[p.Y][p.X] = " x "
 			} else if p.ID == myID {
-				grid[p.Y][p.X] = " @ " // 自己
+				grid[p.Y][p.X] = " @ "
 			} else {
-				grid[p.Y][p.X] = " * " // 敌人
+				grid[p.Y][p.X] = " * "
 			}
 		}
 	}
@@ -76,10 +100,9 @@ func drawUI() {
 		for _, cell := range row {
 			sb.WriteString(cell)
 		}
-		sb.WriteString("\033[K\n") // 渲染完一行后清理右侧残留
+		sb.WriteString("\033[K\n")
 	}
 
-	// 2. 绘制玩家状态列表
 	sb.WriteString("\n─── 战场快报 ─────────────────────────────────────────\033[K\n")
 	for _, p := range latestSnapshot.Players {
 		tag := "  "
@@ -96,15 +119,12 @@ func drawUI() {
 	}
 	sb.WriteString("──────────────────────────────────────────────────────\033[K\n")
 
-	// 3. 绘制近期事件日志
 	for _, e := range eventLog {
 		sb.WriteString("📢 " + e + "\033[K\n")
 	}
 
-	// 4. 清除屏幕下方可能多余的旧数据，并渲染输入提示符
 	sb.WriteString("\033[J")
 	sb.WriteString("> \033[K")
-
 	fmt.Print(sb.String())
 }
 
@@ -117,35 +137,132 @@ func hpBar(hp, maxHP, w int) string {
 		strings.Repeat("█", filled), strings.Repeat("░", w-filled), hp)
 }
 
-func main() {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("请输入你的名字: ")
-	name, _ := reader.ReadString('\n')
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "无名勇士"
-	}
-
-	// 进入终端的 Alternate Screen Buffer
+func enterAltScreen() {
 	fmt.Print("\033[?1049h\033[2J\033[H")
-	defer fmt.Print("\033[?1049l")
+}
+
+func leaveAltScreen() {
+	fmt.Print("\033[?1049l")
+}
+
+type winsize struct {
+	Row    uint16
+	Col    uint16
+	Xpixel uint16
+	Ypixel uint16
+}
+
+func getTerminalSize() (int, int, bool) {
+	ws := &winsize{}
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_IOCTL,
+		os.Stdout.Fd(),
+		uintptr(syscall.TIOCGWINSZ),
+		uintptr(unsafe.Pointer(ws)),
+	)
+	if errno != 0 || ws.Col == 0 || ws.Row == 0 {
+		return 0, 0, false
+	}
+	return int(ws.Col), int(ws.Row), true
+}
+
+// waitForUsableTerminal 在程序最开始就检查终端尺寸。
+// 若窗口太小，则不允许进入游戏，只显示“终端太小”的提示。
+func waitForUsableTerminal() {
+	for {
+		cols, rows, ok := getTerminalSize()
+		if !ok || (cols >= minTermWidth && rows >= minTermHeight) {
+			fmt.Print("\033[2J\033[H")
+			return
+		}
+
+		fmt.Print("\033[2J\033[H")
+		fmt.Printf("═══ BattleWorld 战场 (Lab1) ═══\n")
+		fmt.Printf("⚠ 终端窗口过小：当前 %d×%d，至少需要 %d×%d\n", cols, rows, minTermWidth, minTermHeight)
+		fmt.Printf("请先放大终端窗口，再进入游戏。\n")
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
+func promptName(reader *bufio.Reader, prompt string) string {
+	for {
+		fmt.Print(prompt)
+		name, err := reader.ReadString('\n')
+		if err != nil {
+			return "无名勇士"
+		}
+		name = strings.TrimSpace(name)
+		if name == "" {
+			fmt.Println("名字不能为空，请重新输入。")
+			continue
+		}
+		return name
+	}
+}
+
+// joinUntilAccepted 在进入游戏前完成名字协商。
+// 若服务器提示重名，则客户端原地重新输入名字并再次发送 join。
+func joinUntilAccepted(conn *protocol.Conn, reader *bufio.Reader, firstName string) (protocol.Message, error) {
+	name := firstName
+	for {
+		if err := conn.Send(protocol.Message{Type: protocol.TypeJoin, Text: name}); err != nil {
+			return protocol.Message{}, err
+		}
+
+		for {
+			msg, err := conn.Receive()
+			if err != nil {
+				return protocol.Message{}, err
+			}
+
+			switch msg.Type {
+			case protocol.TypeInit:
+				return msg, nil
+			case protocol.TypeEvent:
+				fmt.Println(msg.Text)
+				if strings.Contains(msg.Text, "名字已被使用") || strings.Contains(msg.Text, "重新输入名字") {
+					name = promptName(reader, "请重新输入名字: ")
+					goto retryJoin
+				}
+			default:
+				// 登录阶段忽略其他类型消息。
+			}
+		}
+	retryJoin:
+	}
+}
+
+func main() {
+	// 按你的要求：终端检查放在最开始。
+	waitForUsableTerminal()
+
+	reader := bufio.NewReader(os.Stdin)
+	name := promptName(reader, "请输入你的名字: ")
 
 	raw, err := net.Dial("tcp", serverAddr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "连接服务器失败: %v\n", err)
-		os.Exit(1)
+		return
 	}
 	defer raw.Close()
 
 	conn := protocol.NewConn(raw)
-	conn.Send(protocol.Message{Type: protocol.TypeJoin, Text: name})
+	initMsg, err := joinUntilAccepted(conn, reader, name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "登录失败: %v\n", err)
+		return
+	}
 
-	addEvent("✅ 已连接服务器，等待游戏开始...")
+	enterAltScreen()
+	defer leaveAltScreen()
+
+	setMyID(initMsg.YourID)
+	addEvent(fmt.Sprintf("🎮 %s", initMsg.Text))
 	drawUI()
 
 	done := make(chan struct{})
+	inputCh := make(chan string)
 
-	// 启动独立的 Goroutine 处理网络接收流水线
 	go func() {
 		defer close(done)
 		for {
@@ -155,12 +272,8 @@ func main() {
 				drawUI()
 				return
 			}
-			// 整合 Lab1 的所有消息类型到事件日志和状态机中
+
 			switch msg.Type {
-			case protocol.TypeInit:
-				myID = msg.YourID
-				addEvent(fmt.Sprintf("🎮 %s", msg.Text))
-				drawUI()
 			case protocol.TypeState:
 				updateSnapshot(msg)
 				drawUI()
@@ -180,51 +293,63 @@ func main() {
 		}
 	}()
 
-	// 主 Goroutine 处理键盘输入流水线
+	go func() {
+		defer close(inputCh)
+		for {
+			in, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			inputCh <- strings.TrimSpace(strings.ToLower(in))
+		}
+	}()
+
 	for {
 		select {
 		case <-done:
 			return
-		default:
-		}
+		case in, ok := <-inputCh:
+			if !ok {
+				return
+			}
 
-		in, err := reader.ReadString('\n')
-		if err != nil {
-			return
-		}
-		in = strings.TrimSpace(strings.ToLower(in))
-		if in == "" {
-			drawUI() // 敲击空回车时强制刷新，抹掉换行符残影
-			continue
-		}
+			if in == "" {
+				drawUI()
+				continue
+			}
 
-		var msg protocol.Message
-		switch in {
-		case "w":
-			msg = protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirUp}
-		case "s":
-			msg = protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirDown}
-		case "a":
-			msg = protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirLeft}
-		case "d":
-			msg = protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirRight}
-		case "f":
-			msg = protocol.Message{Type: protocol.TypeAttack}
-		case "h":
-			msg = protocol.Message{Type: protocol.TypeHeal}
-		case "?", "help":
-			addEvent("操作指令: w/s/a/d(移动) f(攻击) h(药水) q(退出)")
+			var msg protocol.Message
+			switch in {
+			case "w":
+				msg = protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirUp}
+			case "s":
+				msg = protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirDown}
+			case "a":
+				msg = protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirLeft}
+			case "d":
+				msg = protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirRight}
+			case "f":
+				msg = protocol.Message{Type: protocol.TypeAttack}
+			case "h":
+				msg = protocol.Message{Type: protocol.TypeHeal}
+			case "?", "help":
+				addEvent("操作指令: w/s/a/d(移动) f(攻击) h(药水) q(退出)")
+				drawUI()
+				continue
+			case "q", "quit":
+				return
+			default:
+				addEvent("⚠ 未知指令，输入 ? 查看帮助")
+				drawUI()
+				continue
+			}
+
+			if err := conn.Send(msg); err != nil {
+				addEvent("⚠ 指令发送失败，连接可能已断开")
+				drawUI()
+				return
+			}
 			drawUI()
-			continue
-		case "q", "quit":
-			return
-		default:
-			addEvent("⚠ 未知指令，输入 ? 查看帮助")
-			drawUI()
-			continue
 		}
-		conn.Send(msg)
-		// 输入有效指令后立即重绘
-		drawUI()
 	}
 }

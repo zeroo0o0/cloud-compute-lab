@@ -18,6 +18,8 @@ package game
 import (
 	"fmt"
 	"math"
+	"sync"
+	"time"
 
 	"battleworld/protocol"
 )
@@ -72,6 +74,8 @@ type Game struct {
 	Players [2]*Player
 	Turn    int
 	Round   int
+
+	cleanupOnce sync.Once
 }
 
 // NewGame 初始化一局游戏，已实现，无需修改。
@@ -81,18 +85,23 @@ func NewGame(p1, p2 *Player) *Game {
 
 // Run 游戏主循环，已实现，无需修改。
 func (g *Game) Run() {
+	defer g.cleanupConnections()
+
 	fmt.Println("[Game] 对局开始")
 	g.broadcastEvent(fmt.Sprintf("══ 决斗开始！%s  VS  %s ══", g.Players[0].Name, g.Players[1].Name))
 	g.broadcastState()
 	for {
 		cur := g.Players[g.Turn]
 		opp := g.Players[1-g.Turn]
-		cur.Conn.Send(protocol.Message{Type: protocol.TypeYourTurn, Text: fmt.Sprintf("第 %d 回合，轮到你！", g.Round)})
-		opp.Conn.Send(protocol.Message{Type: protocol.TypeWait, Text: fmt.Sprintf("第 %d 回合，等待 %s...", g.Round, cur.Name)})
+		_ = cur.Conn.Send(protocol.Message{Type: protocol.TypeYourTurn, Text: fmt.Sprintf("第 %d 回合，轮到你！", g.Round)})
+		_ = opp.Conn.Send(protocol.Message{Type: protocol.TypeWait, Text: fmt.Sprintf("第 %d 回合，等待 %s...", g.Round, cur.Name)})
 		msg, err := cur.Conn.Receive()
 		if err != nil {
 			g.broadcastEvent(fmt.Sprintf("%s 断线！%s 自动获胜！", cur.Name, opp.Name))
 			g.sendGameOver(opp.Name)
+
+			time.Sleep(5 * time.Second)
+
 			return
 		}
 		if event := g.processAction(cur, opp, msg); event != "" {
@@ -282,7 +291,10 @@ func (g *Game) broadcastState() {
 		Turn:    g.Turn,
 	}
 	for _, p := range g.Players {
-		p.Conn.Send(msg)
+		if p == nil || p.Conn == nil {
+			continue
+		}
+		_ = p.Conn.Send(msg)
 	}
 }
 
@@ -290,13 +302,30 @@ func (g *Game) broadcastEvent(text string) {
 	fmt.Printf("[事件] %s\n", text)
 	msg := protocol.Message{Type: protocol.TypeEvent, Text: text}
 	for _, p := range g.Players {
-		p.Conn.Send(msg)
+		if p == nil || p.Conn == nil {
+			continue
+		}
+		_ = p.Conn.Send(msg)
 	}
 }
 
 func (g *Game) sendGameOver(winner string) {
 	msg := protocol.Message{Type: protocol.TypeGameOver, Winner: winner}
 	for _, p := range g.Players {
-		p.Conn.Send(msg)
+		if p == nil || p.Conn == nil {
+			continue
+		}
+		_ = p.Conn.Send(msg)
 	}
+}
+
+func (g *Game) cleanupConnections() {
+	g.cleanupOnce.Do(func() {
+		for _, p := range g.Players {
+			if p == nil || p.Conn == nil {
+				continue
+			}
+			p.Conn.Close()
+		}
+	})
 }
