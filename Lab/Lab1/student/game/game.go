@@ -165,30 +165,43 @@ func (g *Game) handleMove(p *Player, dir string) string {
 	//   return fmt.Sprintf("🚶 %s 移动到 (%d,%d)", p.Name, p.X, p.Y)
 	oldX, oldY := p.X, p.Y
 
+	newX, newY := p.X, p.Y
+
 	switch dir {
 	case protocol.DirUp:
 		if p.Y > 0 {
-			p.Y--
+			newY--
 		}
 	case protocol.DirDown:
 		if p.Y < protocol.MapHeight-1 {
-			p.Y++
+			newY++
 		}
 	case protocol.DirLeft:
 		if p.X > 0 {
-			p.X--
+			newX--
 		}
 	case protocol.DirRight:
 		if p.X < protocol.MapWidth-1 {
-			p.X++
+			newX++
 		}
 	default:
 		return fmt.Sprintf("[%s] 无效方向 '%s'", p.Name, dir)
 	}
 
-	if p.X == oldX && p.Y == oldY {
+	// 🚧 撞墙
+	if newX == oldX && newY == oldY {
 		return fmt.Sprintf("🚧 %s 撞到了边界", p.Name)
 	}
+
+	// 🚷 撞人（关键新增）
+	for _, other := range g.Players {
+		if other != p && other.Alive && other.X == newX && other.Y == newY {
+			return fmt.Sprintf("🚷 %s 撞到了 %s，位置不变", p.Name, other.Name)
+		}
+	}
+
+	// ✅ 真正移动
+	p.X, p.Y = newX, newY
 
 	return fmt.Sprintf("🚶 %s 移动到 (%d,%d)", p.Name, p.X, p.Y)
 	//panic("handleMove 尚未实现，请完成 TODO")

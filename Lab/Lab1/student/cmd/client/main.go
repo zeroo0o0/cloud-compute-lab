@@ -1,7 +1,8 @@
 // client 是 BattleWorld Lab1 的异步多线程客户端程序。
 //
 // 启动方式：
-//   go run ./cmd/client
+//
+//	go run ./cmd/client
 package main
 
 import (
