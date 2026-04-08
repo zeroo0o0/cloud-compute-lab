@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"math"
 	"sync"
-	"time"
 
 	"battleworld/protocol"
 )
@@ -100,7 +99,7 @@ func (g *Game) Run() {
 			g.broadcastEvent(fmt.Sprintf("%s 断线！%s 自动获胜！", cur.Name, opp.Name))
 			g.sendGameOver(opp.Name)
 
-			time.Sleep(5 * time.Second)
+			// time.Sleep(5 * time.Second)
 
 			return
 		}
