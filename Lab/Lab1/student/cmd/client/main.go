@@ -240,7 +240,23 @@ func main() {
 
 	reader := bufio.NewReader(os.Stdin)
 	name := promptName(reader, "请输入你的名字: ")
+	// ╔═════════════════════════════════════════════════════════════════════════╗
+	// ║  任务 C-3：连接服务器                                                  ║
+	// ║                                                                         ║
+	// ║  功能：通过 TCP 连接到服务器地址 serverAddr。                            ║
+	// ║                                                                         ║
+	// ║  实现要点：                                                             ║
+	// ║    调用 net.Dial("tcp", serverAddr)，将返回值存入 raw 和 err。           ║
+	// ║    若 err != nil，向 os.Stderr 打印错误信息后 os.Exit(1)。              ║
+	// ║    使用 defer raw.Close() 确保程序退出时关闭连接。                       ║
+	// ║                                                                         ║
+	// ║  提示框架：                                                             ║
+	// ║    raw, err := net.Dial(???, ???)                                        ║
+	// ║    if err != nil { ... }                                                ║
+	// ║    defer raw.Close()                                                    ║
+	// ╚═════════════════════════════════════════════════════════════════════════╝
 
+	// TODO C-3: 在此处连接服务器
 	raw, err := net.Dial("tcp", serverAddr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "连接服务器失败: %v\n", err)
