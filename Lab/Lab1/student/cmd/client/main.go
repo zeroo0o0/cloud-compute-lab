@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -31,6 +32,7 @@ var (
 	myID           int
 	eventLog       []string
 	uiMu           sync.Mutex
+	myTurn         uint32
 )
 
 func addEvent(text string) {
@@ -281,9 +283,11 @@ func main() {
 				addEvent(msg.Text)
 				drawUI()
 			case protocol.TypeYourTurn:
+				atomic.StoreUint32(&myTurn, 1)
 				addEvent(fmt.Sprintf("⚡ %s", msg.Text))
 				drawUI()
 			case protocol.TypeWait:
+				atomic.StoreUint32(&myTurn, 0)
 				addEvent(fmt.Sprintf("⏳ %s", msg.Text))
 				drawUI()
 			case protocol.TypeGameOver:
@@ -318,6 +322,14 @@ func main() {
 				continue
 			}
 
+			if atomic.LoadUint32(&myTurn) == 0 {
+				switch in {
+				case "w", "a", "s", "d", "f", "h", "?", "help":
+					drawUI()
+					continue
+				}
+			}
+
 			var msg protocol.Message
 			switch in {
 			case "w":
@@ -349,6 +361,7 @@ func main() {
 				drawUI()
 				return
 			}
+			atomic.StoreUint32(&myTurn, 0)
 			drawUI()
 		}
 	}
