@@ -2,58 +2,97 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
+	"os"
 	"runtime"
 	"sort"
 	"sync"
 	"time"
 )
 
-var mockData = bytes.Repeat([]byte("A"), 10*1024)
-
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		return new(bytes.Buffer)
-	},
-}
-
-var dummy int
-
-//go:noinline
-func doSomeWork() {
-	for j := 0; j < 500; j++ {
-		dummy += j
+func doSomeWork(iterations int) int {
+	sum := 0
+	for j := 0; j < iterations; j++ {
+		sum += j
 	}
+	return sum
 }
 
-func processWithoutPool(id int, latencies []time.Duration, wg *sync.WaitGroup) {
-	defer wg.Done()
+type stats struct {
+	totalDuration time.Duration
+	allocs        uint64
+	gcCount       uint32
+	latencies     []time.Duration
+}
+
+func runExperiment(
+	usePool bool,
+	numRequests int,
+	payloadSize int,
+	workIterations int,
+	concurrency int,
+) stats {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	if concurrency > numRequests {
+		concurrency = numRequests
+	}
+
+	mockData := bytes.Repeat([]byte("A"), payloadSize)
+	bufferPool := sync.Pool{
+		New: func() any {
+			buf := new(bytes.Buffer)
+			buf.Grow(payloadSize)
+			return buf
+		},
+	}
+
+	latencies := make([]time.Duration, numRequests)
+	resultSink := make([]int, numRequests)
+
+	runtime.GC()
+	var startMem runtime.MemStats
+	runtime.ReadMemStats(&startMem)
 	start := time.Now()
 
-	buf := new(bytes.Buffer)
-	buf.Grow(10 * 1024)
-	buf.Write(mockData)
-	_ = buf.Bytes()
+	jobs := make(chan int, concurrency)
+	var workerWG sync.WaitGroup
+	for worker := 0; worker < concurrency; worker++ {
+		workerWG.Add(1)
+		go func() {
+			defer workerWG.Done()
+			for id := range jobs {
+				begin := time.Now()
 
-	doSomeWork()
-	latencies[id] = time.Since(start)
-}
+				var buf *bytes.Buffer
+				if usePool {
+					buf = bufferPool.Get().(*bytes.Buffer)
+					buf.Reset()
+				} else {
+					buf = new(bytes.Buffer)
+					buf.Grow(payloadSize)
+				}
 
-func processWithPool(id int, latencies []time.Duration, wg *sync.WaitGroup) {
-	defer wg.Done()
-	start := time.Now()
+				buf.Write(mockData)
+				resultSink[id] = len(buf.Bytes()) + doSomeWork(workIterations)
 
-	buf := bufferPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	buf.Write(mockData)
-	_ = buf.Bytes()
+				if usePool {
+					bufferPool.Put(buf)
+				}
+				latencies[id] = time.Since(begin)
+			}
+		}()
+	}
 
-	doSomeWork()
-	bufferPool.Put(buf)
-	latencies[id] = time.Since(start)
-}
+	for i := 0; i < numRequests; i++ {
+		jobs <- i
+	}
+	close(jobs)
+	workerWG.Wait()
+	runtime.KeepAlive(resultSink)
 
-func printPercentiles(name string, latencies []time.Duration, startMem runtime.MemStats, startTime time.Time) {
 	var endMem runtime.MemStats
 	runtime.ReadMemStats(&endMem)
 
@@ -61,64 +100,81 @@ func printPercentiles(name string, latencies []time.Duration, startMem runtime.M
 		return latencies[i] < latencies[j]
 	})
 
-	totalDuration := time.Since(startTime)
-	allocs := endMem.Mallocs - startMem.Mallocs
-	gcCount := endMem.NumGC - startMem.NumGC
+	return stats{
+		totalDuration: time.Since(start),
+		allocs:        endMem.Mallocs - startMem.Mallocs,
+		gcCount:       endMem.NumGC - startMem.NumGC,
+		latencies:     latencies,
+	}
+}
 
-	length := len(latencies)
-	p50 := latencies[length*50/100]
-	p90 := latencies[length*90/100]
-	p99 := latencies[length*99/100]
-	p999 := latencies[length*999/1000]
+func printStats(label string, s stats) {
+	length := len(s.latencies)
+	p50 := s.latencies[length*50/100]
+	p90 := s.latencies[length*90/100]
+	p99 := s.latencies[length*99/100]
+	p999 := s.latencies[length*999/1000]
 
-	fmt.Printf("\n[%s]\n", name)
-	fmt.Printf("总耗时 (涵盖调度): %v\n", totalDuration)
-	fmt.Printf("堆内存分配 (Mallocs): %d 次\n", allocs)
-	fmt.Printf("触发 GC 次数: %d 次\n", gcCount)
-	fmt.Println("------------- 延迟分布 (微秒/毫秒) -------------")
-	fmt.Printf("P50  (中位数): %.3f 微秒\n", float64(p50.Nanoseconds())/1000.0)
-	fmt.Printf("P90  延迟    : %.3f 微秒\n", float64(p90.Nanoseconds())/1000.0)
-	fmt.Printf("P99  延迟    : %.3f 微秒\n", float64(p99.Nanoseconds())/1000.0)
-	fmt.Printf("P99.9延迟    : %.3f 微秒  <-- 观察对比项\n", float64(p999.Nanoseconds())/1000.0)
-	fmt.Println("------------------------------------------------")
+	fmt.Printf("\n[%s]\n", label)
+	fmt.Printf("总耗时: %v\n", s.totalDuration)
+	fmt.Printf("堆内存分配 (Mallocs): %d 次\n", s.allocs)
+	fmt.Printf("触发 GC 次数: %d 次\n", s.gcCount)
+	fmt.Println("------------- 延迟分布 -------------")
+	fmt.Printf("P50   : %.3f 微秒\n", float64(p50.Nanoseconds())/1000.0)
+	fmt.Printf("P90   : %.3f 微秒\n", float64(p90.Nanoseconds())/1000.0)
+	fmt.Printf("P99   : %.3f 微秒\n", float64(p99.Nanoseconds())/1000.0)
+	fmt.Printf("P99.9 : %.3f 微秒\n", float64(p999.Nanoseconds())/1000.0)
+	fmt.Println("-----------------------------------")
+}
+
+func usage() {
+	fmt.Println("用法:")
+	fmt.Println("  go run ./cmd/exp5/sync_pool_demo before [-requests 12000] [-payload-kb 10] [-work 500] [-concurrency 32]")
+	fmt.Println("  go run ./cmd/exp5/sync_pool_demo after  [-requests 12000] [-payload-kb 10] [-work 500] [-concurrency 32]")
+	fmt.Println()
+	fmt.Println("建议先运行 before，再用完全相同的参数运行 after。")
 }
 
 func main() {
-	const numRequests = 20000
-	var wg sync.WaitGroup
+	if len(os.Args) < 2 {
+		usage()
+		return
+	}
 
+	mode := os.Args[1]
+	fs := flag.NewFlagSet(mode, flag.ExitOnError)
+	numRequests := fs.Int("requests", 12000, "请求总数")
+	payloadKB := fs.Int("payload-kb", 10, "每次请求的临时缓冲大小（KB）")
+	workIterations := fs.Int("work", 500, "每次请求的额外计算量")
+	concurrency := fs.Int("concurrency", 32, "固定并发度，用于更严格地控制变量")
+	fs.Parse(os.Args[2:])
+
+	if mode != "before" && mode != "after" {
+		usage()
+		return
+	}
+	if *numRequests < 1 {
+		fmt.Println("requests 必须大于 0")
+		return
+	}
+
+	usePool := mode == "after"
 	fmt.Println("=== 实验五：高并发性能榨取（sync.Pool） ===")
-	fmt.Println("场景: 高频请求里频繁申请 10KB 临时缓冲，对比“每次 new”与“对象复用”。")
-	fmt.Println("说明: 本实验只做本地对象池演示，数据库连接池保留为概念扩展。")
-
-	latenciesNoPool := make([]time.Duration, numRequests)
-	runtime.GC()
-	var m1 runtime.MemStats
-	runtime.ReadMemStats(&m1)
-	t1 := time.Now()
-
-	for i := 0; i < numRequests; i++ {
-		wg.Add(1)
-		go processWithoutPool(i, latenciesNoPool, &wg)
+	if usePool {
+		fmt.Println("当前模式: 优化后（使用 sync.Pool 复用临时缓冲）")
+	} else {
+		fmt.Println("当前模式: 优化前（每次都 new 一个临时缓冲）")
 	}
-	wg.Wait()
-	printPercentiles("基准：无优化 (频繁 10KB 分配)", latenciesNoPool, m1, t1)
+	fmt.Printf("本次参数: requests=%d, payload=%dKB, work=%d, concurrency=%d\n",
+		*numRequests, *payloadKB, *workIterations, *concurrency)
+	fmt.Println("说明: 把“是否使用对象池”作为核心对照变量，其他参数保持一致。")
 
-	time.Sleep(1 * time.Second)
-
-	latenciesWithPool := make([]time.Duration, numRequests)
-	runtime.GC()
-	var m2 runtime.MemStats
-	runtime.ReadMemStats(&m2)
-	t2 := time.Now()
-
-	for i := 0; i < numRequests; i++ {
-		wg.Add(1)
-		go processWithPool(i, latenciesWithPool, &wg)
+	s := runExperiment(usePool, *numRequests, *payloadKB*1024, *workIterations, *concurrency)
+	if usePool {
+		printStats("优化后：+sync.Pool", s)
+		fmt.Println("\n[提示] 请与 before 模式在相同参数下的 Mallocs、GC 和 P99.9 对比。")
+	} else {
+		printStats("优化前：频繁分配临时对象", s)
+		fmt.Println("\n[提示] 现在请用相同参数运行 after 模式，再对比两次结果。")
 	}
-	wg.Wait()
-	printPercentiles("优化：+sync.Pool (复用 10KB 缓冲)", latenciesWithPool, m2, t2)
-
-	fmt.Println("\n[提示] 重点对比两组结果里的 Mallocs、GC 次数和 P99.9 延迟。")
-	fmt.Println("[扩展] 真正的数据库连接池属于另一类资源池，本章只做对象池演示。")
 }

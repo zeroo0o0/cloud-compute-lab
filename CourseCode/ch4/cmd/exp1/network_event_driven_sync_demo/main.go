@@ -77,27 +77,34 @@ func renderPositions(pos map[int]int) string {
 	return fmt.Sprintf("P1(x=%d) P2(x=%d) P3(x=%d) P4(x=%d)", pos[1], pos[2], pos[3], pos[4])
 }
 
-func clientScript(playerID int) []InputEvent {
+func clientScript(playerID int, overrideDelay time.Duration) []InputEvent {
+	pickDelay := func(defaultDelay time.Duration) time.Duration {
+		if overrideDelay >= 0 {
+			return overrideDelay
+		}
+		return defaultDelay
+	}
+
 	switch playerID {
 	case 1:
 		return []InputEvent{
-			{PlayerID: 1, Seq: 1, Action: "MOVE", DeltaX: +1, LocalAt: 0 * time.Millisecond, Delay: 20 * time.Millisecond},
-			{PlayerID: 1, Seq: 2, Action: "MOVE", DeltaX: +1, LocalAt: 200 * time.Millisecond, Delay: 20 * time.Millisecond},
+			{PlayerID: 1, Seq: 1, Action: "MOVE", DeltaX: +1, LocalAt: 0 * time.Millisecond, Delay: pickDelay(20 * time.Millisecond)},
+			{PlayerID: 1, Seq: 2, Action: "MOVE", DeltaX: +1, LocalAt: 200 * time.Millisecond, Delay: pickDelay(20 * time.Millisecond)},
 		}
 	case 2:
 		return []InputEvent{
-			{PlayerID: 2, Seq: 1, Action: "MOVE", DeltaX: +1, LocalAt: 0 * time.Millisecond, Delay: 30 * time.Millisecond},
-			{PlayerID: 2, Seq: 2, Action: "MOVE", DeltaX: +1, LocalAt: 200 * time.Millisecond, Delay: 30 * time.Millisecond},
+			{PlayerID: 2, Seq: 1, Action: "MOVE", DeltaX: +1, LocalAt: 0 * time.Millisecond, Delay: pickDelay(30 * time.Millisecond)},
+			{PlayerID: 2, Seq: 2, Action: "MOVE", DeltaX: +1, LocalAt: 200 * time.Millisecond, Delay: pickDelay(30 * time.Millisecond)},
 		}
 	case 3:
 		return []InputEvent{
-			{PlayerID: 3, Seq: 1, Action: "MOVE", DeltaX: -1, LocalAt: 0 * time.Millisecond, Delay: 40 * time.Millisecond},
-			{PlayerID: 3, Seq: 2, Action: "MOVE", DeltaX: -1, LocalAt: 200 * time.Millisecond, Delay: 40 * time.Millisecond},
+			{PlayerID: 3, Seq: 1, Action: "MOVE", DeltaX: -1, LocalAt: 0 * time.Millisecond, Delay: pickDelay(40 * time.Millisecond)},
+			{PlayerID: 3, Seq: 2, Action: "MOVE", DeltaX: -1, LocalAt: 200 * time.Millisecond, Delay: pickDelay(40 * time.Millisecond)},
 		}
 	case 4:
 		return []InputEvent{
-			{PlayerID: 4, Seq: 1, Action: "MOVE", DeltaX: -1, LocalAt: 0 * time.Millisecond, Delay: 500 * time.Millisecond},
-			{PlayerID: 4, Seq: 2, Action: "MOVE", DeltaX: -1, LocalAt: 200 * time.Millisecond, Delay: 500 * time.Millisecond},
+			{PlayerID: 4, Seq: 1, Action: "MOVE", DeltaX: -1, LocalAt: 0 * time.Millisecond, Delay: pickDelay(500 * time.Millisecond)},
+			{PlayerID: 4, Seq: 2, Action: "MOVE", DeltaX: -1, LocalAt: 200 * time.Millisecond, Delay: pickDelay(500 * time.Millisecond)},
 		}
 	default:
 		return nil
@@ -113,7 +120,7 @@ type incomingEvent struct {
 func runServer(addr string) error {
 	printDivider("实验一 / Network Event-Driven Server")
 	logln("监听地址:", addr)
-	logln("运行方式: 再打开 1 个终端执行 client 模式。")
+	logln("运行方式: 再打开 4 个终端，分别执行 4 次 client 模式。")
 	logln("目标: 服务器按 tick 前进，不等最慢客户端，只消费已经到达的事件，并做增量同步。")
 
 	ln, err := net.Listen("tcp", addr)
@@ -286,38 +293,24 @@ func acceptClient(conn net.Conn) (*ClientSession, error) {
 	return &ClientSession{ID: playerID, Conn: conn, Reader: reader, Writer: writer}, nil
 }
 
-func runClient(addr string) error {
+func runClient(addr string, playerID int, delayOverride time.Duration) error {
 	printDivider("实验一 / Network Event-Driven Client")
 	logln("连接服务器:", addr)
-	logf("当前进程会同时模拟 %d 名玩家，每名玩家保持一条独立连接。\n", expectedPlayers)
-
-	var wg sync.WaitGroup
-	errCh := make(chan error, expectedPlayers)
-	for playerID := 1; playerID <= expectedPlayers; playerID++ {
-		wg.Add(1)
-		go func(playerID int) {
-			defer wg.Done()
-			if err := runOnePlayerClient(addr, playerID); err != nil {
-				errCh <- err
-			}
-		}(playerID)
+	logf("当前进程只模拟 1 名玩家: player=%d\n", playerID)
+	if delayOverride >= 0 {
+		logf("已覆盖该玩家所有输入的网络延迟: %s\n", formatMS(delayOverride))
 	}
-	wg.Wait()
-	close(errCh)
-
-	for err := range errCh {
-		if err != nil {
-			return err
-		}
+	if err := runOnePlayerClient(addr, playerID, delayOverride); err != nil {
+		return err
 	}
 
 	printDivider("Network Event-Driven Client 结束")
-	logln("所有玩家脚本执行完毕。")
+	logln("该玩家脚本执行完毕。")
 	return nil
 }
 
-func runOnePlayerClient(addr string, playerID int) error {
-	script := clientScript(playerID)
+func runOnePlayerClient(addr string, playerID int, delayOverride time.Duration) error {
+	script := clientScript(playerID, delayOverride)
 	if len(script) == 0 {
 		return fmt.Errorf("玩家%d 没有预设脚本", playerID)
 	}
@@ -440,12 +433,34 @@ func writeLine(writer *bufio.Writer, line string) error {
 	return writer.Flush()
 }
 
+func splitPlayerArg(args []string) ([]string, string) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		return args[1:], args[0]
+	}
+	return args, ""
+}
+
+func parsePlayerArg(positional string, current int) (int, error) {
+	if current >= 1 && current <= expectedPlayers {
+		return current, nil
+	}
+	if positional == "" {
+		return 0, fmt.Errorf("-player 必须是 1~4")
+	}
+	playerID, err := strconv.Atoi(positional)
+	if err != nil || playerID < 1 || playerID > expectedPlayers {
+		return 0, fmt.Errorf("玩家编号必须是 1~4")
+	}
+	return playerID, nil
+}
+
 func usage() {
 	fmt.Println("用法:")
 	fmt.Println("  go run ./cmd/exp1/network_event_driven_sync_demo server [-addr 127.0.0.1:9107]")
-	fmt.Println("  go run ./cmd/exp1/network_event_driven_sync_demo client [-addr 127.0.0.1:9107]")
+	fmt.Println("  go run ./cmd/exp1/network_event_driven_sync_demo client -player 1 [-addr 127.0.0.1:9107] [-delay-ms 500]")
+	fmt.Println("  go run ./cmd/exp1/network_event_driven_sync_demo client 1 [-addr 127.0.0.1:9107] [-delay-ms 500]")
 	fmt.Println()
-	fmt.Println("建议打开 2 个终端: 1 个 server + 1 个 client。")
+	fmt.Println("建议打开 5 个终端: 1 个 server + 4 个 client（每个 client 对应 1 名玩家）。")
 }
 
 func main() {
@@ -464,10 +479,22 @@ func main() {
 			os.Exit(1)
 		}
 	case "client":
+		clientArgs, positionalPlayer := splitPlayerArg(os.Args[2:])
 		fs := flag.NewFlagSet("client", flag.ExitOnError)
 		addr := fs.String("addr", defaultAddr, "服务器地址")
-		fs.Parse(os.Args[2:])
-		if err := runClient(*addr); err != nil {
+		playerID := fs.Int("player", 0, "玩家编号（1~4）")
+		delayMS := fs.Int("delay-ms", -1, "覆盖该玩家所有输入的网络延迟（毫秒）")
+		fs.Parse(clientArgs)
+		resolvedPlayerID, err := parsePlayerArg(positionalPlayer, *playerID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "client error: %v\n", err)
+			os.Exit(1)
+		}
+		override := time.Duration(*delayMS) * time.Millisecond
+		if *delayMS < 0 {
+			override = -1
+		}
+		if err := runClient(*addr, resolvedPlayerID, override); err != nil {
 			fmt.Fprintf(os.Stderr, "client error: %v\n", err)
 			os.Exit(1)
 		}

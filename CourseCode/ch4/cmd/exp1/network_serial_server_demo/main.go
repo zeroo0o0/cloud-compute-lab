@@ -74,27 +74,41 @@ func renderPositions(pos map[int]int) string {
 	return fmt.Sprintf("P1(x=%d) P2(x=%d) P3(x=%d) P4(x=%d)", pos[1], pos[2], pos[3], pos[4])
 }
 
-func defaultFrames(playerID int) map[int]InputEvent {
+func explainQueueDelay(queueDelay time.Duration) string {
+	if queueDelay <= 0 {
+		return "服务器一读就拿到了消息"
+	}
+	return fmt.Sprintf("消息已在缓冲区里额外等了 %s", formatMS(queueDelay))
+}
+
+func defaultFrames(playerID int, overrideLatency time.Duration) map[int]InputEvent {
+	pickLatency := func(defaultLatency time.Duration) time.Duration {
+		if overrideLatency >= 0 {
+			return overrideLatency
+		}
+		return defaultLatency
+	}
+
 	switch playerID {
 	case 1:
 		return map[int]InputEvent{
-			1: {PlayerID: 1, Action: "MOVE", DeltaX: +1, Latency: 11 * time.Millisecond},
-			2: {PlayerID: 1, Action: "MOVE", DeltaX: +1, Latency: 11 * time.Millisecond},
+			1: {PlayerID: 1, Action: "MOVE", DeltaX: +1, Latency: pickLatency(11 * time.Millisecond)},
+			2: {PlayerID: 1, Action: "MOVE", DeltaX: +1, Latency: pickLatency(11 * time.Millisecond)},
 		}
 	case 2:
 		return map[int]InputEvent{
-			1: {PlayerID: 2, Action: "MOVE", DeltaX: +1, Latency: 12 * time.Millisecond},
-			2: {PlayerID: 2, Action: "MOVE", DeltaX: +1, Latency: 12 * time.Millisecond},
+			1: {PlayerID: 2, Action: "MOVE", DeltaX: +1, Latency: pickLatency(12 * time.Millisecond)},
+			2: {PlayerID: 2, Action: "MOVE", DeltaX: +1, Latency: pickLatency(12 * time.Millisecond)},
 		}
 	case 3:
 		return map[int]InputEvent{
-			1: {PlayerID: 3, Action: "MOVE", DeltaX: -1, Latency: 13 * time.Millisecond},
-			2: {PlayerID: 3, Action: "MOVE", DeltaX: -1, Latency: 13 * time.Millisecond},
+			1: {PlayerID: 3, Action: "MOVE", DeltaX: -1, Latency: pickLatency(13 * time.Millisecond)},
+			2: {PlayerID: 3, Action: "MOVE", DeltaX: -1, Latency: pickLatency(13 * time.Millisecond)},
 		}
 	case 4:
 		return map[int]InputEvent{
-			1: {PlayerID: 4, Action: "MOVE", DeltaX: -1, Latency: 500 * time.Millisecond},
-			2: {PlayerID: 4, Action: "MOVE", DeltaX: -1, Latency: 500 * time.Millisecond},
+			1: {PlayerID: 4, Action: "MOVE", DeltaX: -1, Latency: pickLatency(500 * time.Millisecond)},
+			2: {PlayerID: 4, Action: "MOVE", DeltaX: -1, Latency: pickLatency(500 * time.Millisecond)},
 		}
 	default:
 		return map[int]InputEvent{}
@@ -104,7 +118,7 @@ func defaultFrames(playerID int) map[int]InputEvent {
 func runServer(addr string) error {
 	printDivider("实验一 / Network Serial Server")
 	logln("监听地址:", addr)
-	logln("运行方式: 再打开 1 个终端执行 client 模式。")
+	logln("运行方式: 再打开 4 个终端，分别执行 4 次 client 模式。")
 	logln("目标: 让“慢客户端 -> 服务器串行收包 -> 主循环被拖慢”的链路真实发生。")
 
 	ln, err := net.Listen("tcp", addr)
@@ -212,9 +226,15 @@ func runServerFrame(
 			return fmt.Errorf("收到的玩家编号与等待顺序不一致: want=%d got=%d", pid, ev.PlayerID)
 		}
 
-		waited := time.Since(frameStart)
-		logf("[收到] Frame %-2d 玩家%-2d  %-4s %+d  客户端延迟=%-8s 累计等待=%s\n",
-			frame, ev.PlayerID, ev.Action, ev.DeltaX, formatMS(ev.Latency), formatMS(waited))
+		now := time.Now()
+		elapsed := now.Sub(frameStart).Round(100 * time.Microsecond)
+		queueDelay := elapsed - ev.Latency
+		if queueDelay < 0 {
+			queueDelay = 0
+		}
+		logf("[收到] Frame %-2d 玩家%-2d  %-4s %+d  客户端延迟=%-8s 到达时间轴=%-8s 额外排队=%-8s %s\n",
+			frame, ev.PlayerID, ev.Action, ev.DeltaX,
+			formatMS(ev.Latency), formatMS(elapsed), formatMS(queueDelay), explainQueueDelay(queueDelay))
 		positions[ev.PlayerID] = clamp(positions[ev.PlayerID]+ev.DeltaX, 0, trackWidth)
 	}
 
@@ -227,39 +247,23 @@ func runServerFrame(
 	return nil
 }
 
-func runClient(addr string) error {
+func runClient(addr string, playerID int, latencyOverride time.Duration) error {
 	printDivider("实验一 / Network Serial Client")
 	logln("连接服务器:", addr)
-	logf("当前进程会同时模拟 %d 名玩家，每名玩家保持一条独立连接。\n", expectedPlayers)
-
-	var wg sync.WaitGroup
-	errCh := make(chan error, expectedPlayers)
-
-	for playerID := 1; playerID <= expectedPlayers; playerID++ {
-		wg.Add(1)
-		go func(playerID int) {
-			defer wg.Done()
-			if err := runOnePlayerClient(addr, playerID); err != nil {
-				errCh <- err
-			}
-		}(playerID)
+	logf("当前进程只模拟 1 名玩家: player=%d\n", playerID)
+	if latencyOverride >= 0 {
+		logf("已覆盖该玩家的模拟延迟: %s\n", formatMS(latencyOverride))
 	}
-
-	wg.Wait()
-	close(errCh)
-
-	for err := range errCh {
-		if err != nil {
-			return err
-		}
+	if err := runOnePlayerClient(addr, playerID, latencyOverride); err != nil {
+		return err
 	}
 	printDivider("Client 结束")
-	logln("所有玩家脚本执行完毕。")
+	logln("该玩家脚本执行完毕。")
 	return nil
 }
 
-func runOnePlayerClient(addr string, playerID int) error {
-	frames := defaultFrames(playerID)
+func runOnePlayerClient(addr string, playerID int, latencyOverride time.Duration) error {
+	frames := defaultFrames(playerID, latencyOverride)
 	if len(frames) == 0 {
 		return fmt.Errorf("玩家%d 没有预设脚本，请使用 1~4 号玩家", playerID)
 	}
@@ -387,12 +391,34 @@ func writeLine(writer *bufio.Writer, line string) error {
 	return writer.Flush()
 }
 
+func splitPlayerArg(args []string) ([]string, string) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		return args[1:], args[0]
+	}
+	return args, ""
+}
+
+func parsePlayerArg(positional string, current int) (int, error) {
+	if current >= 1 && current <= expectedPlayers {
+		return current, nil
+	}
+	if positional == "" {
+		return 0, fmt.Errorf("-player 必须是 1~4")
+	}
+	playerID, err := strconv.Atoi(positional)
+	if err != nil || playerID < 1 || playerID > expectedPlayers {
+		return 0, fmt.Errorf("玩家编号必须是 1~4")
+	}
+	return playerID, nil
+}
+
 func usage() {
 	fmt.Println("用法:")
 	fmt.Println("  go run ./cmd/exp1/network_serial_server_demo server [-addr 127.0.0.1:9101]")
-	fmt.Println("  go run ./cmd/exp1/network_serial_server_demo client [-addr 127.0.0.1:9101]")
+	fmt.Println("  go run ./cmd/exp1/network_serial_server_demo client -player 1 [-addr 127.0.0.1:9101] [-latency-ms 500]")
+	fmt.Println("  go run ./cmd/exp1/network_serial_server_demo client 1 [-addr 127.0.0.1:9101] [-latency-ms 500]")
 	fmt.Println()
-	fmt.Println("建议打开 2 个终端: 1 个 server + 1 个 client。")
+	fmt.Println("建议打开 5 个终端: 1 个 server + 4 个 client（每个 client 对应 1 名玩家）。")
 }
 
 func main() {
@@ -412,11 +438,24 @@ func main() {
 			os.Exit(1)
 		}
 	case "client":
+		clientArgs, positionalPlayer := splitPlayerArg(os.Args[2:])
 		fs := flag.NewFlagSet("client", flag.ExitOnError)
 		addr := fs.String("addr", defaultAddr, "服务器地址")
-		fs.Parse(os.Args[2:])
+		playerID := fs.Int("player", 0, "玩家编号（1~4）")
+		latencyMS := fs.Int("latency-ms", -1, "覆盖该玩家所有帧的模拟延迟（毫秒）")
+		fs.Parse(clientArgs)
 
-		if err := runClient(*addr); err != nil {
+		resolvedPlayerID, err := parsePlayerArg(positionalPlayer, *playerID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "client error: %v\n", err)
+			os.Exit(1)
+		}
+		override := time.Duration(*latencyMS) * time.Millisecond
+		if *latencyMS < 0 {
+			override = -1
+		}
+
+		if err := runClient(*addr, resolvedPlayerID, override); err != nil {
 			fmt.Fprintf(os.Stderr, "client error: %v\n", err)
 			os.Exit(1)
 		}
