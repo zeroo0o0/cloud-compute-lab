@@ -304,25 +304,153 @@ func (c *Cluster) BuyItem(username, item string) (*protocol.WorldState, error) {
 }
 
 func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
-	// TODO(Lab3-1):
-	// 这里需要把“世界首领”做成跨地图、跨节点共享的全局热状态。
-	// 要求至少完成：
-	// 1. 校验玩家和当前地图的首领投影距离，太远则拒绝攻击。
-	// 2. 对全局首领 HP 做单写者更新，避免多个节点并发扣血产生不一致。
-	// 3. 首领死亡时，给所有参与玩家统一结算奖励，并安排复活。
-	// 4. 将结果广播到所有在线会话，而不是只发给当前地图。
-	return nil, studentTODOError("Lab3-1", "cluster.AttackBoss", "完成全服共享世界首领的协同结算")
+	session, node, err := c.sessionNode(username)
+	if err != nil {
+		return nil, err
+	}
+
+	profile, ok := node.Profile(session.MapID, username)
+	if !ok {
+		return nil, errors.New("当前角色不在地图中")
+	}
+	if !profile.Alive {
+		c.pushEvent(username, "倒地状态下无法攻击世界首领")
+		return c.SnapshotFor(username)
+	}
+
+	site, ok := c.bossSite(session.MapID)
+	if !ok {
+		return nil, fmt.Errorf("地图 %q 当前没有首领投影", session.MapID)
+	}
+	if manhattan(profile.X, profile.Y, site.X, site.Y) > protocol.BossAtkRange {
+		c.pushEvent(username, "距离世界首领投影过远，无法造成伤害")
+		return c.SnapshotFor(username)
+	}
+
+	damage := profile.Attack + profile.Treasures/2
+	if damage < 20 {
+		damage = 20
+	}
+
+	type rewardItem struct {
+		username string
+		profile  protocol.UserProfile
+	}
+	rewards := make([]rewardItem, 0, 8)
+	needRespawn := false
+
+	c.mu.Lock()
+	if !c.boss.Alive {
+		c.mu.Unlock()
+		c.pushEvent(username, fmt.Sprintf("世界首领【%s】尚未重生，请稍后再战", c.boss.Name))
+		return c.SnapshotFor(username)
+	}
+
+	c.boss.HP = max(0, c.boss.HP-damage)
+	c.boss.LastHit = username
+	c.boss.Version++
+	c.boss.Contributors[username] += damage
+
+	c.broadcastGlobalEventLocked(fmt.Sprintf("%s 对世界首领【%s】造成 %d 点伤害（剩余 %d/%d）", username, c.boss.Name, damage, c.boss.HP, c.boss.MaxHP))
+
+	if c.boss.HP == 0 {
+		c.boss.Alive = false
+		c.boss.RespawnAt = time.Now().Add(15 * time.Second)
+		needRespawn = true
+
+		for contributor := range c.boss.Contributors {
+			s, ok := c.sessions[contributor]
+			if !ok {
+				continue
+			}
+			n := c.nodes[s.NodeID]
+			if n == nil {
+				continue
+			}
+			updated, ok := n.RewardPlayer(s.MapID, contributor, 6, 1)
+			if !ok {
+				continue
+			}
+			updated.LastMap = s.MapID
+			updated.LastNode = s.NodeID
+			rewards = append(rewards, rewardItem{username: contributor, profile: updated})
+			c.pushEventLocked(s, fmt.Sprintf("你参与讨伐并获得奖励：战利品 +%d，胜场 +%d", 6, 1))
+		}
+
+		c.broadcastGlobalEventLocked(fmt.Sprintf("%s 终结了世界首领【%s】，全服参战者获得奖励", username, c.boss.Name))
+	}
+	c.mu.Unlock()
+
+	for _, item := range rewards {
+		_ = c.store.SaveProfile(item.profile)
+		_ = c.persistSessionState(item.username)
+	}
+
+	if needRespawn {
+		go c.respawnBossAfterCooldown()
+	}
+
+	return c.SnapshotFor(username)
 }
 
 func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, error) {
-	// TODO(Lab3-2):
-	// 这里需要实现“跨地图切换 + 节点路由迁移”。
-	// 至少要处理：
-	// 1. 从源节点摘除玩家热状态。
-	// 2. 根据 owners 路由把玩家挂到目标地图主节点。
-	// 3. 更新 session.MapID / session.NodeID。
-	// 4. 将新的位置、地图、节点落盘到冷热数据。
-	return nil, studentTODOError("Lab3-2", "cluster.SwitchMap", "完成跨地图路由与会话迁移")
+	c.mu.RLock()
+	if _, ok := c.configs[targetMap]; !ok {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("未知地图：%s", targetMap)
+	}
+	session, ok := c.sessions[username]
+	if !ok {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("用户 %q 当前不在线", username)
+	}
+	fromMap := session.MapID
+	fromNodeID := session.NodeID
+	toNodeID := c.owners[targetMap]
+	fromNode := c.nodes[fromNodeID]
+	toNode := c.nodes[toNodeID]
+	c.mu.RUnlock()
+
+	if fromNode == nil || toNode == nil || !toNode.IsHealthy() {
+		return nil, errors.New("目标地图当前没有可用节点")
+	}
+
+	if fromMap == targetMap {
+		c.pushEvent(username, fmt.Sprintf("你已在地图 %s", targetMap))
+		return c.SnapshotFor(username)
+	}
+
+	currentProfile, ok := fromNode.Profile(fromMap, username)
+	if !ok {
+		return nil, errors.New("当前角色不在源地图中")
+	}
+	if !currentProfile.Alive {
+		c.pushEvent(username, "复活前不能切换地图")
+		return c.SnapshotFor(username)
+	}
+
+	profile, removed := fromNode.RemovePlayer(fromMap, username)
+	if !removed {
+		profile = currentProfile
+	}
+	// 保留来源地图，便于目标地图按照出生点重定位。
+	profile.LastMap = fromMap
+	profile.LastNode = fromNodeID
+	toNode.AddPlayer(targetMap, &profile)
+
+	c.mu.Lock()
+	if live, ok := c.sessions[username]; ok {
+		live.MapID = targetMap
+		live.NodeID = toNodeID
+		c.pushEventLocked(live, fmt.Sprintf("你已切换到地图 %s（承载节点 %s）", targetMap, toNodeID))
+	}
+	c.mu.Unlock()
+
+	profile.LastMap = targetMap
+	profile.LastNode = toNodeID
+	_ = c.store.SaveProfile(profile)
+	_ = c.persistSessionState(username)
+	return c.SnapshotFor(username)
 }
 
 func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
@@ -486,13 +614,44 @@ func (c *Cluster) broadcastMapEvent(mapID, event string) {
 }
 
 func (c *Cluster) persistSessionState(username string) error {
-	// TODO(Lab3-3):
-	// 这里负责把玩家当前热状态写回存储。
-	// 建议区分：
-	// 1. 冷数据：账号、密码哈希、历史战绩、最近退出位置。
-	// 2. 热数据：当前地图、节点、坐标、生命值、会话版本。
-	// 注意持久化时机，避免因为节点故障导致最新状态丢失。
-	return studentTODOError("Lab3-3", "cluster.persistSessionState", "完成会话热数据与用户冷数据持久化")
+	c.mu.RLock()
+	session, ok := c.sessions[username]
+	if !ok {
+		c.mu.RUnlock()
+		return c.store.DeleteHotSession(username)
+	}
+	mapID := session.MapID
+	nodeID := session.NodeID
+	sessionVersion := session.Version
+	node := c.nodes[nodeID]
+	c.mu.RUnlock()
+
+	if node == nil {
+		return fmt.Errorf("节点 %q 当前不可用", nodeID)
+	}
+
+	profile, ok := node.Profile(mapID, username)
+	if !ok {
+		return fmt.Errorf("玩家 %q 当前不在地图 %q", username, mapID)
+	}
+	profile.LastMap = mapID
+	profile.LastNode = nodeID
+
+	hot := protocol.HotSession{
+		Username:       username,
+		MapID:          mapID,
+		NodeID:         nodeID,
+		X:              profile.X,
+		Y:              profile.Y,
+		HP:             profile.HP,
+		Treasures:      profile.Treasures,
+		SessionVersion: sessionVersion,
+		UpdatedAt:      time.Now(),
+	}
+	if err := c.store.SaveHotSession(hot); err != nil {
+		return err
+	}
+	return c.store.SaveProfile(profile)
 }
 
 func (c *Cluster) respawnBossAfterCooldown() {
@@ -572,15 +731,55 @@ func (c *Cluster) heartbeatLoop() {
 }
 
 func (c *Cluster) checkpointLoop() {
-	// TODO(Lab3-4):
-	// 这里要实现“主节点定期生成检查点，并复制给副本节点”。
-	// 至少要包含：
-	// 1. 从 owners 找到每张地图当前主节点。
-	// 2. 抓取主节点地图快照。
-	// 3. 同时写入本地检查点存储与 replica 节点内存。
-	// 4. 跳过故障节点，避免把坏状态继续扩散。
-	logStudentTODO("Lab3-4", "cluster.checkpointLoop", "完成主节点检查点复制与副本同步")
-	<-c.stopCh
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.mu.RLock()
+			mapIDs := make([]string, 0, len(c.owners))
+			for mapID := range c.owners {
+				mapIDs = append(mapIDs, mapID)
+			}
+			sort.Strings(mapIDs)
+
+			type plan struct {
+				mapID     string
+				owner     *NodeService
+				replica   *NodeService
+				replicaID string
+			}
+			plans := make([]plan, 0, len(mapIDs))
+			for _, mapID := range mapIDs {
+				ownerID := c.owners[mapID]
+				owner := c.nodes[ownerID]
+				if owner == nil || !owner.IsHealthy() {
+					continue
+				}
+				replicaID := c.replicas[mapID]
+				replica := c.nodes[replicaID]
+				if replica != nil && !replica.IsHealthy() {
+					replica = nil
+				}
+				plans = append(plans, plan{mapID: mapID, owner: owner, replica: replica, replicaID: replicaID})
+			}
+			c.mu.RUnlock()
+
+			for _, p := range plans {
+				cp, err := p.owner.Checkpoint(p.mapID)
+				if err != nil {
+					continue
+				}
+				_ = c.store.SaveCheckpoint(cp)
+				if p.replica != nil {
+					p.replica.StoreReplica(cp)
+				}
+			}
+		case <-c.stopCh:
+			return
+		}
+	}
 }
 
 func (c *Cluster) flushLoop() {
@@ -607,14 +806,96 @@ func (c *Cluster) flushLoop() {
 }
 
 func (c *Cluster) handleNodeFailure(nodeID string) {
-	// TODO(Lab3-5):
-	// 这里需要完成“主节点故障 -> 副本提升 -> 会话重路由”。
-	// 最关键的步骤是：
-	// 1. 找到故障节点承载的所有主地图。
-	// 2. 选择对应副本并提升为新主节点。
-	// 3. 更新 owners / replicas 元数据。
-	// 4. 修正所有受影响玩家会话的 NodeID，并广播故障切换事件。
-	logStudentTODO("Lab3-5", "cluster.handleNodeFailure", "完成主节点故障后的副本提升与会话重路由")
+	type persistedProfile struct {
+		username string
+		profile  protocol.UserProfile
+	}
+
+	persistList := make([]persistedProfile, 0, 16)
+
+	c.mu.Lock()
+	failedNode := c.nodes[nodeID]
+	if failedNode == nil {
+		c.mu.Unlock()
+		return
+	}
+
+	mapIDs := make([]string, 0, len(c.owners))
+	for mapID, ownerID := range c.owners {
+		if ownerID == nodeID {
+			mapIDs = append(mapIDs, mapID)
+		}
+	}
+	sort.Strings(mapIDs)
+
+	for _, mapID := range mapIDs {
+		cfg := c.configs[mapID]
+		nextOwnerID := ""
+		replicaID := c.replicas[mapID]
+
+		if replicaID != "" {
+			if replica := c.nodes[replicaID]; replica != nil && replica.IsHealthy() {
+				if err := replica.Promote(mapID, cfg); err == nil {
+					nextOwnerID = replicaID
+				}
+			}
+		}
+
+		if nextOwnerID == "" {
+			candidateID := c.pickReplicaLocked(nodeID)
+			if candidateID != "" {
+				candidate := c.nodes[candidateID]
+				if err := candidate.Promote(mapID, cfg); err == nil {
+					nextOwnerID = candidateID
+				} else if cp, ok := c.store.LoadCheckpoint(mapID); ok {
+					candidate.RestorePrimaryMap(cfg, *cp)
+					nextOwnerID = candidateID
+				}
+			}
+		}
+
+		if nextOwnerID == "" {
+			continue
+		}
+
+		failedNode.RemoveHostedMap(mapID)
+		c.owners[mapID] = nextOwnerID
+
+		nextReplicaID := c.pickReplicaLocked(nextOwnerID)
+		c.replicas[mapID] = nextReplicaID
+
+		if promoted := c.nodes[nextOwnerID]; promoted != nil {
+			if cp, err := promoted.Checkpoint(mapID); err == nil {
+				_ = c.store.SaveCheckpoint(cp)
+				if replica := c.nodes[nextReplicaID]; replica != nil && replica.IsHealthy() {
+					replica.StoreReplica(cp)
+				}
+			}
+		}
+
+		for _, session := range c.sessions {
+			if session.MapID != mapID {
+				continue
+			}
+			session.NodeID = nextOwnerID
+			c.pushEventLocked(session, fmt.Sprintf("检测到节点 %s 故障，地图 %s 已切换到 %s", nodeID, mapID, nextOwnerID))
+			if newNode := c.nodes[nextOwnerID]; newNode != nil {
+				if profile, ok := newNode.Profile(mapID, session.Username); ok {
+					profile.LastMap = mapID
+					profile.LastNode = nextOwnerID
+					persistList = append(persistList, persistedProfile{username: session.Username, profile: profile})
+				}
+			}
+		}
+
+		c.broadcastGlobalEventLocked(fmt.Sprintf("故障切换：地图 %s 已从 %s 迁移到 %s", mapID, nodeID, nextOwnerID))
+	}
+	c.mu.Unlock()
+
+	for _, item := range persistList {
+		_ = c.store.SaveProfile(item.profile)
+		_ = c.persistSessionState(item.username)
+	}
 }
 
 func (c *Cluster) pickReplicaLocked(ownerID string) string {
