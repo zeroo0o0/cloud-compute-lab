@@ -62,8 +62,20 @@ func main() {
 	// ║    }()                                                            ║
 	// ╚═══════════════════════════════════════════════════════════════════╝
 
-	// TODO D-1: 在此处启动广播 Goroutine
-	_ = time.Millisecond // 防止 import 报错，实现后可删除
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			snapshot := w.GetSnapshot()
+			if len(snapshot) == 0 {
+				continue
+			}
+			w.BroadcastAll(protocol.Message{
+				Type:    protocol.TypeBroadcast,
+				Players: snapshot,
+			})
+		}
+	}()
 
 	// 主循环：持续接受新连接
 	for {
@@ -85,8 +97,7 @@ func main() {
 		// ║  正确写法（并发）：  go handleClient(w, raw)                 ║
 		// ╚═══════════════════════════════════════════════════════════════╝
 
-		// TODO D-2: 将此行改为 Goroutine 调用
-		handleClient(w, raw) // ← 请在此行前加 go 关键字
+		go handleClient(w, raw)
 	}
 }
 

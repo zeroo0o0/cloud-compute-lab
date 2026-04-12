@@ -77,9 +77,9 @@ func (p *Player) toInfo() protocol.PlayerInfo {
 //   - 读操作可并发（多个读者同时读取）
 //   - 写者与读者互斥（写时不能读，读时不能写）
 type World struct {
-	mu      sync.RWMutex   // 读写锁，保护以下字段
+	mu      sync.RWMutex    // 读写锁，保护以下字段
 	players map[int]*Player // 玩家 ID → 玩家实体
-	nextID  int            // 下一个可用的玩家 ID
+	nextID  int             // 下一个可用的玩家 ID
 }
 
 // NewWorld 创建空世界，已实现，无需修改。
@@ -102,18 +102,14 @@ func NewWorld() *World {
 // ║    5. 返回 id 和玩家指针                                                ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) AddPlayer(name string, conn *protocol.Conn) (int, *Player) {
-	// TODO: 加写锁，创建玩家，存入 map，返回 id 和玩家
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	// 提示框架：
-	// w.mu.Lock()
-	// defer w.mu.Unlock()
-	// id := w.nextID
-	// w.nextID++
-	// p := newPlayer(id, name, conn)
-	// w.players[id] = p
-	// return id, p
-
-	panic("AddPlayer 尚未实现，请完成 TODO")
+	id := w.nextID
+	w.nextID++
+	p := newPlayer(id, name, conn)
+	w.players[id] = p
+	return id, p
 }
 
 // ╔═════════════════════════════════════════════════════════════════════════╗
@@ -128,9 +124,10 @@ func (w *World) AddPlayer(name string, conn *protocol.Conn) (int, *Player) {
 // ║    2. delete(w.players, id)                                             ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) RemovePlayer(id int) {
-	// TODO: 加写锁，从 map 中删除 id 对应的玩家
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	panic("RemovePlayer 尚未实现，请完成 TODO")
+	delete(w.players, id)
 }
 
 // ╔═════════════════════════════════════════════════════════════════════════╗
@@ -152,9 +149,39 @@ func (w *World) RemovePlayer(id int) {
 // ║    5. 若坐标未变，返回"撞墙"字符串；否则返回移动成功字符串             ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) MovePlayer(id int, dir string) string {
-	// TODO: 加写锁，查找玩家，移动并做边界检查，返回事件字符串
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	panic("MovePlayer 尚未实现，请完成 TODO")
+	p, ok := w.players[id]
+	if !ok || !p.Alive {
+		return ""
+	}
+
+	oldX, oldY := p.X, p.Y
+	switch dir {
+	case protocol.DirUp:
+		if p.Y > 0 {
+			p.Y--
+		}
+	case protocol.DirDown:
+		if p.Y < protocol.MapHeight-1 {
+			p.Y++
+		}
+	case protocol.DirLeft:
+		if p.X > 0 {
+			p.X--
+		}
+	case protocol.DirRight:
+		if p.X < protocol.MapWidth-1 {
+			p.X++
+		}
+	}
+
+	if oldX == p.X && oldY == p.Y {
+		return fmt.Sprintf("🧱 %s 撞墙了，无法移动", p.Name)
+	}
+
+	return fmt.Sprintf("🚶 %s 移动到了 (%d,%d)", p.Name, p.X, p.Y)
 }
 
 // ╔═════════════════════════════════════════════════════════════════════════╗
@@ -183,12 +210,51 @@ func (w *World) MovePlayer(id int, dir string) string {
 // ║      因此主函数释放锁后，复活 Goroutine 才能获取锁，不会死锁。          ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) AttackPlayer(attackerID int, broadcastFn func(string)) string {
-	// TODO: 加写锁，查找攻击者，找最弱目标，扣血，处理死亡与复活 Goroutine
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
-	_ = math.Abs  // 防止 import 报错，实现后可删除
-	_ = time.Sleep // 防止 import 报错
+	attacker, ok := w.players[attackerID]
+	if !ok || !attacker.Alive {
+		return ""
+	}
 
-	panic("AttackPlayer 尚未实现，请完成 TODO")
+	var target *Player
+	for _, p := range w.players {
+		if p.ID == attackerID || !p.Alive {
+			continue
+		}
+		dist := math.Abs(float64(attacker.X-p.X)) + math.Abs(float64(attacker.Y-p.Y))
+		if dist > protocol.AttackRange {
+			continue
+		}
+		if target == nil || p.HP < target.HP {
+			target = p
+		}
+	}
+
+	if target == nil {
+		return fmt.Sprintf("⚔️ %s 范围内没有敌人", attacker.Name)
+	}
+
+	target.HP -= protocol.AttackDmg
+	if target.HP <= 0 {
+		target.HP = 0
+		target.Alive = false
+		attacker.Kills++
+
+		targetID := target.ID
+		targetName := target.Name
+		go func() {
+			time.Sleep(5 * time.Second)
+			w.respawn(targetID)
+			broadcastFn(fmt.Sprintf("✨ %s 已复活！", targetName))
+		}()
+
+		return fmt.Sprintf("💥 %s 击败了 %s！", attacker.Name, targetName)
+	}
+
+	return fmt.Sprintf("⚔️ %s 攻击了 %s，造成 %d 伤害（目标 HP: %d）",
+		attacker.Name, target.Name, protocol.AttackDmg, target.HP)
 }
 
 // HealPlayer 使用药水，已实现，无需修改。
@@ -244,9 +310,14 @@ func (w *World) respawn(id int) {
 // ║    4. 返回 infos                                                        ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) GetSnapshot() []protocol.PlayerInfo {
-	// TODO: 加读锁，遍历 players，收集并返回所有玩家的 Info 快照
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 
-	panic("GetSnapshot 尚未实现，请完成 TODO")
+	infos := make([]protocol.PlayerInfo, 0, len(w.players))
+	for _, p := range w.players {
+		infos = append(infos, p.toInfo())
+	}
+	return infos
 }
 
 // ─── 广播辅助（无需修改） ────────────────────────────────────────────────────

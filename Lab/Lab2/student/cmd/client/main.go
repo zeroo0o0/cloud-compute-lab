@@ -206,6 +206,33 @@ func main() {
 	// ║        }                                                          ║
 	// ║    }()                                                            ║
 	// ╚═══════════════════════════════════════════════════════════════════╝
+	go func() {
+		defer close(done)
+		for {
+			msg, err := conn.Receive()
+			if err != nil {
+				addEvent("与服务器的连接已断开。")
+				drawUI()
+				return
+			}
+			switch msg.Type {
+			case protocol.TypeInit:
+				myPlayerID = msg.YourID
+				addEvent(fmt.Sprintf("🎮 %s（你的ID: %d）", msg.Text, myPlayerID))
+				drawUI()
+			case protocol.TypeBroadcast:
+				updateSnapshot(msg)
+				drawUI()
+			case protocol.TypeEvent:
+				addEvent(msg.Text)
+				drawUI()
+			case protocol.TypeGameOver:
+				addEvent(fmt.Sprintf("💀 游戏通知: %s", msg.Winner))
+				drawUI()
+			}
+		}
+	}()
+
 	keyReader := bufio.NewReader(os.Stdin)
 	for {
 		select {
