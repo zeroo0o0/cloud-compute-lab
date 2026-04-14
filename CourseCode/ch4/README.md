@@ -28,10 +28,14 @@ ch4/
     ├── exp2/right/                     # ② Mutex 修复版
     ├── exp3/busy_wait/                 # ③ 忙等错误版
     ├── exp3/cond_wait/                 # ③ Cond 等待唤醒版
+    ├── exp3/spurious_wakeup_demo/      # ③ 虚假唤醒极简演示
     ├── exp4/channel_semaphore/         # ④ Channel 信号量
     ├── exp4/channel_timeout_lock/      # ④ Channel 超时锁
+    ├── exp4/lock_cost_demo/            # ④ 锁代价极简演示
     ├── exp4/rw_mutex/                  # ④ Mutex 与 RWMutex 对照
     ├── exp5/sync_pool_demo/            # ⑤ sync.Pool 对象池优化
+    ├── exp5/connection_pool_demo/      # ⑤ 本机 TCP 连接池演示
+    ├── exp5/perf_observe_demo/         # ⑤ 性能观测工具教程
     ├── exp6/write_through_demo/        # ⑥ Write Through 演示
     └── exp6/cache_aside_demo/          # ⑥ Cache Aside 演示
 ```
@@ -306,6 +310,14 @@ quit
 
 **观察点**：库存为空时玩家进入等待队列；补货后被 `Signal()` 唤醒，并在 `for npc.Items == 0` 中重新检查条件。
 
+#### 演示 3：虚假唤醒极简版
+
+```powershell
+go run ./cmd/exp3/spurious_wakeup_demo
+```
+
+**观察点**：错误版用 `if`，被一次“没有补货的通知”唤醒后就继续取空队列；正确版用 `for`，每次 `Wait()` 返回后都重新检查队列是否真的有宝物。
+
 ---
 
 ### Step 4 — 锁的进阶技巧与粒度优化
@@ -314,9 +326,21 @@ quit
 
 **知识点**：Channel 信号量、超时锁、`sync.RWMutex`。
 
-**实验功能**：演示 Go 中不止有普通 Mutex，还可以用 Channel 表达许可数和超时竞争，并用 RWMutex 优化读多写少场景。
+**实验功能**：演示 Go 中不止有普通 Mutex，还可以用 Channel 表达许可数和超时竞争，并用 RWMutex 优化读多写少场景；同时用一个极简性能对照感受“锁加多了程序会变慢”。
 
-#### 演示 1：Channel 信号量
+#### 演示 1：锁的代价极简版
+
+```powershell
+go run ./cmd/exp4/lock_cost_demo
+```
+
+**观察点**：同样计算最终金币，`每次击杀都 Lock/Unlock` 会比 `本地累计后再合并一次` 慢很多；如果课堂机器太快，可以加大 `-ops`。
+
+```powershell
+go run ./cmd/exp4/lock_cost_demo -workers 8 -ops 2000000
+```
+
+#### 演示 2：Channel 信号量
 
 ```powershell
 go run ./cmd/exp4/channel_semaphore
@@ -333,7 +357,7 @@ quit
 
 **观察点**：Channel 容量为 3，同一时刻真正进入执行区的 Worker 数量不会超过 3。
 
-#### 演示 2：Channel 超时锁
+#### 演示 3：Channel 超时锁
 
 ```powershell
 go run ./cmd/exp4/channel_timeout_lock
@@ -341,7 +365,7 @@ go run ./cmd/exp4/channel_timeout_lock
 
 **观察点**：玩家 A 占用资源 5 秒，玩家 B 只等待 2 秒；超时后进入降级逻辑，避免永久阻塞。
 
-#### 演示 3：Mutex 与 RWMutex 对照
+#### 演示 4：Mutex 与 RWMutex 对照
 
 ```powershell
 go run ./cmd/exp4/rw_mutex
@@ -361,9 +385,11 @@ go run ./cmd/exp4/rw_mutex
 
 **对应页码**：第 54, 56, 58 页
 
-**知识点**：`sync.Pool`、对象复用、GC 压力、尾延迟。
+**知识点**：`sync.Pool`、对象复用、连接池、长连接复用、`pprof`、Benchmark、GC 压力、尾延迟。
 
-**实验功能**：对比高频请求中“每次 new 一个 10KB 临时缓冲”和“通过 sync.Pool 复用缓冲”的分配次数、GC 次数和尾延迟。实验固定并发度，把核心变量控制为是否使用对象池。
+**实验功能**：先对比高频请求中“每次 new 一个 10KB 临时缓冲”和“通过 sync.Pool 复用缓冲”的分配次数、GC 次数和尾延迟；再用本机 TCP server 演示“每个请求都新建短连接”和“从连接池借还长连接”的耗时差异；最后用 pprof 和 benchmark 演示如何定位 CPU 热点、内存分配、锁竞争和 goroutine 泄漏。
+
+#### 演示 1：对象池 sync.Pool
 
 ```powershell
 # 优化前：每次 new
@@ -380,6 +406,50 @@ go run ./cmd/exp5/sync_pool_demo after -requests 12000 -payload-kb 10 -work 500 
 - `P99` / `P99.9` 是否降低。
 
 **说明**：这里演示的是对象池，不是数据库连接池；两者都叫“池”，但资源类型和生命周期约束不同。
+
+#### 演示 2：网络连接池
+
+```powershell
+go run ./cmd/exp5/connection_pool_demo
+```
+
+**观察点**：短连接版本每个请求都 `Dial + Close`；连接池版本只创建少量长连接，后续请求从池子里借连接、用完再还。输出会直接对比建连次数和总耗时。
+
+如果课堂机器太快，可以放大模拟建连成本：
+
+```powershell
+go run ./cmd/exp5/connection_pool_demo -requests 240 -concurrency 24 -max-open 16 -max-idle 8 -lifetime-ms 200 -handshake-ms 50
+```
+
+**贴近 PPT 的看法**：这个 demo 现在明确对应连接池初始化三项配置：
+
+- `maxOpenConns`：最多同时打开多少条连接
+- `maxIdleConns`：最多保留多少条空闲连接
+- `connMaxLifetime`：连接活多久后需要重建
+
+#### 演示 3：性能观测工具教程
+
+详细安装和命令见：
+
+```powershell
+CourseCode/ch4/cmd/exp5/perf_observe_demo/README.md
+```
+
+最小命令示例：
+
+```powershell
+# Benchmark + 分配观测
+go test ./cmd/exp5/perf_observe_demo -run '^$' -bench . -benchmem
+
+# CPU profile
+go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkCPUHotspotBad -benchtime 2s -cpuprofile cpu_bad.prof
+go tool pprof -top cpu_bad.prof
+
+# goroutine profile HTTP 观测
+go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 20
+```
+
+**观察点**：用 `BenchmarkCPUHotspotBad/Good` 对比 CPU 热点优化；用 `BenchmarkHeapAllocBad/Good` 对比 `allocs/op`；用 `BenchmarkMutexContentionBad/Good` 和 `-mutexprofile` 观察锁竞争；用 `-mode leak/fixed` 观察 goroutine 数量是否持续上涨。
 
 ---
 

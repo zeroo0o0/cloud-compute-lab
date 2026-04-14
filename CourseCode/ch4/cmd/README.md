@@ -21,13 +21,17 @@ cmd/
 │  └─ right/
 ├─ exp3/
 │  ├─ busy_wait/
-│  └─ cond_wait/
+│  ├─ cond_wait/
+│  └─ spurious_wakeup_demo/
 ├─ exp4/
 │  ├─ channel_semaphore/
 │  ├─ channel_timeout_lock/
+│  ├─ lock_cost_demo/
 │  └─ rw_mutex/
 ├─ exp5/
-│  └─ sync_pool_demo/
+│  ├─ sync_pool_demo/
+│  ├─ connection_pool_demo/
+│  └─ perf_observe_demo/
 └─ exp6/
    ├─ write_through_demo/
    └─ cache_aside_demo/
@@ -60,18 +64,23 @@ cmd/
 - exp3：告别忙等
   - `go run ./cmd/exp3/busy_wait`
   - `go run ./cmd/exp3/cond_wait`
-  - 说明：`busy_wait` 展示库存为空时玩家不断空转检查；`cond_wait` 展示玩家进入 `sync.Cond` 等待队列并在补货后被唤醒。
+  - `go run ./cmd/exp3/spurious_wakeup_demo`
+  - 说明：`busy_wait` 展示库存为空时玩家不断空转检查；`cond_wait` 展示玩家进入 `sync.Cond` 等待队列并在补货后被唤醒；`spurious_wakeup_demo` 用最小队列演示为什么 `Wait()` 后必须用 `for` 重新检查条件，而不是用 `if`。
 
 - exp4：锁的进阶技巧与粒度优化
+  - `go run ./cmd/exp4/lock_cost_demo`
   - `go run ./cmd/exp4/channel_semaphore`
   - `go run ./cmd/exp4/channel_timeout_lock`
   - `go run ./cmd/exp4/rw_mutex`
-  - 说明：`channel_semaphore` 用 Channel 容量限制最大并发；`channel_timeout_lock` 用 `select + time.After` 演示超时降级；`rw_mutex` 对比普通 Mutex 与 RWMutex 在读多写少场景下的等待差异。
+  - 说明：`lock_cost_demo` 用“刷怪金币”演示频繁加锁的真实耗时；`channel_semaphore` 用 Channel 容量限制最大并发；`channel_timeout_lock` 用 `select + time.After` 演示超时降级；`rw_mutex` 对比普通 Mutex 与 RWMutex 在读多写少场景下的等待差异。
 
 - exp5：高并发性能榨取
   - `go run ./cmd/exp5/sync_pool_demo before`
   - `go run ./cmd/exp5/sync_pool_demo after`
-  - 说明：`before` 每次请求都新建临时 `bytes.Buffer`；`after` 使用 `sync.Pool` 复用临时对象。两组使用相同请求数、缓冲大小、工作量和并发度，便于对比分配次数、GC 次数和尾延迟。
+  - `go run ./cmd/exp5/connection_pool_demo`
+  - `go test ./cmd/exp5/perf_observe_demo -run '^$' -bench . -benchmem`
+  - `go run ./cmd/exp5/perf_observe_demo -mode leak`
+  - 说明：`before` 每次请求都新建临时 `bytes.Buffer`；`after` 使用 `sync.Pool` 复用临时对象；`connection_pool_demo` 用本机 TCP 长连接池演示短连接改成长连接池后如何减少重复建连时间，并显式展示 `maxOpenConns / maxIdleConns / connMaxLifetime` 三项配置；`perf_observe_demo` 提供 CPU、Heap、Mutex、Goroutine 的 pprof 教程，具体命令见该目录 README。
 
 - exp6：游戏数据分层存储架构
   - `go run ./cmd/exp6/write_through_demo`
@@ -84,7 +93,7 @@ cmd/
 
 - `exp1` 包含 3 个最小原理演示和 3 组网络嵌入演示；网络嵌入版均按“1 个 server + 2 个 client（fast/slow）”运行。
 - `exp2` 和 `exp3` 使用“错误版 / 修复版”结构，便于课堂前后对照。
-- `exp4` 将 Channel 信号量、Channel 超时锁、RWMutex 对照拆成 3 个独立入口。
-- `exp5` 将对象池优化拆成 `before` 和 `after` 两个模式，便于单独记录结果。
+- `exp4` 将锁代价、Channel 信号量、Channel 超时锁、RWMutex 对照拆成 4 个独立入口。
+- `exp5` 包含对象池、连接池和性能观测工具三个演示；对象池用 `before/after` 模式对比临时对象复用，连接池用本机 TCP server 对比短连接和长连接池，性能观测工具教程覆盖 pprof CPU/Heap/Mutex/Goroutine。
 - `exp6` 将 `Write Through` 和 `Cache Aside` 拆成两个独立程序，避免两种一致性方案混在同一次输出中。
 - exp1 已按教学需要拆分 server/client 入口；旧的 `network_*_demo server/client` 混合入口不再使用。
