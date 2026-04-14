@@ -30,6 +30,16 @@ func main() {
 	fmt.Println("[演示前] 查看初始金币状态：")
 	demo.ShowGoldConsistency("player_1")
 
+	/*
+		================ 【学生重点 实验六：Write Through 入口】 ================
+		金币属于核心资产，所以不能只改缓存。
+		请进入 internal/exp6demo.DeductGold 看真正顺序：
+		1. 先写 PostgreSQL。
+		2. PostgreSQL 提交成功后，再同步写 Redis。
+
+		这个入口只负责把“扣金币”场景单独拿出来，避免和配置缓存演示混在一起。
+		===============================================================
+	*/
 	if err := demo.DeductGold("player_1", 20); err != nil {
 		fmt.Printf("[错误] Write Through 执行失败：%v\n", err)
 		return

@@ -22,6 +22,17 @@ func playerTask(playerID int, npc *NPC, emptyRuns []atomic.Int64, wg *sync.WaitG
 	defer wg.Done()
 
 	for {
+		/*
+			================ 【学生重点 实验三：忙等错误版】 ================
+			请盯住这个循环：
+			1. Lock：玩家抢锁进来看一眼库存。
+			2. Check：如果 npc.Items 还是 0，说明没有宝物。
+			3. Unlock：马上释放锁，然后立刻进入下一轮。
+
+			库存为空时，这段代码不会睡觉，只会不断重复 Lock -> Check -> Unlock。
+			所以输出里的“白跑次数”会一直涨，这就是实验三要演示的忙等。
+			==============================================================
+		*/
 		npc.mu.Lock()
 		if npc.Items > 0 {
 			npc.Items--

@@ -134,6 +134,17 @@ func (s *StorageDemo) DeductGold(userID string, deductAmount int) error {
 	start := time.Now()
 	fmt.Printf("[Write Through] 开始扣除 %s 金币 %d...\n", userID, deductAmount)
 
+	/*
+		================ 【学生重点 实验六：Write Through 核心顺序】 ================
+		金币扣除是强一致场景，请只看下面三步：
+		1. 开 PostgreSQL 事务。
+		2. 在事务里扣金币，并拿到扣完后的 currentGold。
+		3. 提交成功以后，再把 currentGold 写入 Redis。
+
+		关键点：如果 PostgreSQL 写失败，就不会继续更新 Redis。
+		所以 Redis 不会把一个“数据库里没有成功的扣款结果”提前展示给玩家。
+		====================================================================
+	*/
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("开启 PostgreSQL 事务失败: %w", err)
@@ -185,6 +196,17 @@ func (s *StorageDemo) GetGameConfig(key string) string {
 	start := time.Now()
 	cacheKey := "cfg:" + key
 
+	/*
+		================ 【学生重点 实验六：Cache Aside 读路径】 ================
+		配置数据是读多写少场景，请只看这个读取顺序：
+		1. 先读 Redis。
+		2. 如果命中，直接返回。
+		3. 如果未命中，再读 PostgreSQL。
+		4. 读到以后写回 Redis，下一次就能命中缓存。
+
+		这叫“旁路缓存”：业务代码自己决定什么时候查缓存、什么时候查数据库。
+		==================================================================
+	*/
 	val, err := s.redis.Get(ctx, cacheKey).Result()
 	if err == nil {
 		fmt.Printf("[Cache Aside 读] 缓存命中 %s=%s，耗时=%v\n", key, val, time.Since(start))
@@ -212,6 +234,17 @@ func (s *StorageDemo) UpdateGameConfig(key, newVal string) {
 	start := time.Now()
 	fmt.Printf("[Cache Aside 写] 开始更新 %s=%s ...\n", key, newVal)
 
+	/*
+		================ 【学生重点 实验六：Cache Aside 写路径】 ================
+		写配置时不要先改 Redis，也不要把新值直接写进 Redis。
+		这里故意做两步：
+		1. 先更新 PostgreSQL。
+		2. 数据库成功以后，删除 Redis 里的旧缓存。
+
+		删除后，下一次读取会 miss，再从 PostgreSQL 读到新值并回填。
+		这就是实验六要讲的“写时失效，读时回填”。
+		==================================================================
+	*/
 	if _, err := s.db.ExecContext(ctx, `
         UPDATE game_configs
         SET config_value = $1

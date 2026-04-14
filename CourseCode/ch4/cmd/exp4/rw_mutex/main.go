@@ -21,6 +21,14 @@ type mutexAdapter struct {
 	mu sync.Mutex
 }
 
+/*
+================ 【学生重点 实验四：普通 Mutex 对照组】 ================
+普通 Mutex 不区分“读”和“写”。
+所以这里的 RLock 只能退化成 Lock：读者和读者之间也会互相排队。
+
+第一轮运行它，是为了先看到“所有人都串行通过”的基线效果。
+==================================================================
+*/
 func (m *mutexAdapter) Lock()    { m.mu.Lock() }
 func (m *mutexAdapter) Unlock()  { m.mu.Unlock() }
 func (m *mutexAdapter) RLock()   { m.mu.Lock() }
@@ -33,6 +41,15 @@ type rwMutexAdapter struct {
 	mu sync.RWMutex
 }
 
+/*
+================ 【学生重点 实验四：RWMutex 实验组】 ================
+RWMutex 把锁拆成两种：
+1. RLock：读锁，多个读者可以同时进入。
+2. Lock：写锁，写者进入时必须独占，不能和读者同时执行。
+
+第二轮运行同一组读写任务，就是为了看“读多写少”场景下读锁带来的并发收益。
+==============================================================
+*/
 func (m *rwMutexAdapter) Lock()    { m.mu.Lock() }
 func (m *rwMutexAdapter) Unlock()  { m.mu.Unlock() }
 func (m *rwMutexAdapter) RLock()   { m.mu.RLock() }
@@ -101,6 +118,14 @@ func runScenario(locker readWriteLocker) scenarioResult {
 	}
 
 	wg.Add(5)
+	/*
+		================ 【学生重点 实验四：相同任务，对比两种锁】 ================
+		下面 5 个 goroutine 的到达时间和持锁时间在两轮实验里完全一样。
+		变化的只有 locker：第一轮是普通 Mutex，第二轮是 RWMutex。
+
+		这样才能把差异归因到“是否区分读锁和写锁”，而不是任务顺序变了。
+		==================================================================
+	*/
 	go reader("R1(首批读者)", 0, 1200*time.Millisecond)
 	go reader("R2(首批读者)", 0, 1200*time.Millisecond)
 	go writer("W1(写者)", 999, 100*time.Millisecond, 1*time.Second)

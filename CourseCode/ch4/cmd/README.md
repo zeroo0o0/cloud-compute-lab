@@ -9,9 +9,13 @@
 ```text
 cmd/
 ├─ exp1/
-│  ├─ network_serial_server_demo/
-│  ├─ network_goroutine_server_demo/
-│  └─ network_event_driven_sync_demo/
+│  ├─ README.md
+│  ├─ 01_basic_serial_blocking_demo/
+│  ├─ 02_network_serial_warzone/
+│  ├─ 03_basic_goroutine_receiver_demo/
+│  ├─ 04_network_goroutine_warzone/
+│  ├─ 05_basic_event_driven_demo/
+│  └─ 06_network_event_driven_warzone/
 ├─ exp2/
 │  ├─ wrong/
 │  └─ right/
@@ -34,13 +38,19 @@ cmd/
 ## 运行入口
 
 - exp1：突破单线程瓶颈
-  - `go run ./cmd/exp1/network_serial_server_demo server`
-  - `go run ./cmd/exp1/network_serial_server_demo client -player 1`
-  - `go run ./cmd/exp1/network_goroutine_server_demo server`
-  - `go run ./cmd/exp1/network_goroutine_server_demo client -player 1`
-  - `go run ./cmd/exp1/network_event_driven_sync_demo server`
-  - `go run ./cmd/exp1/network_event_driven_sync_demo client -player 1`
-  - 说明：`network_serial_server_demo` 展示慢连接如何拖慢串行收包；`network_goroutine_server_demo` 展示每条连接独立 goroutine 收包；`network_event_driven_sync_demo` 展示按 tick 处理已到达事件并做增量同步。
+  - `go run ./cmd/exp1/01_basic_serial_blocking_demo`
+  - `go run ./cmd/exp1/02_network_serial_warzone/server`
+  - `go run ./cmd/exp1/02_network_serial_warzone/client -player fast`
+  - `go run ./cmd/exp1/02_network_serial_warzone/client -player slow`
+  - `go run ./cmd/exp1/03_basic_goroutine_receiver_demo`
+  - `go run ./cmd/exp1/04_network_goroutine_warzone/server`
+  - `go run ./cmd/exp1/04_network_goroutine_warzone/client -player fast`
+  - `go run ./cmd/exp1/04_network_goroutine_warzone/client -player slow`
+  - `go run ./cmd/exp1/05_basic_event_driven_demo`
+  - `go run ./cmd/exp1/06_network_event_driven_warzone/server`
+  - `go run ./cmd/exp1/06_network_event_driven_warzone/client -player fast`
+  - `go run ./cmd/exp1/06_network_event_driven_warzone/client -player slow`
+  - 说明：`01/03/05_basic_*` 用最小代码讲原理；`02/04/06_network_*_warzone/server|client` 把同一原理嵌入 Warzone 的“玩家 ACTION -> 权威 PlayerState -> STATE_UPDATE”极简流程。服务端和客户端已拆开，具体知识点对应代码见 `cmd/exp1/README.md`。
 
 - exp2：临界区与数据竞争
   - `go run ./cmd/exp2/wrong`
@@ -72,9 +82,9 @@ cmd/
 
 ## 命名说明
 
-- `exp1` 包含 3 个网络演示入口，均按“1 个 server + 4 个 client”运行。
+- `exp1` 包含 3 个最小原理演示和 3 组网络嵌入演示；网络嵌入版均按“1 个 server + 2 个 client（fast/slow）”运行。
 - `exp2` 和 `exp3` 使用“错误版 / 修复版”结构，便于课堂前后对照。
 - `exp4` 将 Channel 信号量、Channel 超时锁、RWMutex 对照拆成 3 个独立入口。
 - `exp5` 将对象池优化拆成 `before` 和 `after` 两个模式，便于单独记录结果。
 - `exp6` 将 `Write Through` 和 `Cache Aside` 拆成两个独立程序，避免两种一致性方案混在同一次输出中。
-- 当前目录保持原路径不变，避免影响既有讲义、截图和运行命令。
+- exp1 已按教学需要拆分 server/client 入口；旧的 `network_*_demo server/client` 混合入口不再使用。

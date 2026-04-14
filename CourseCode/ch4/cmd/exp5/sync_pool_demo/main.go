@@ -41,6 +41,15 @@ func runExperiment(
 	}
 
 	mockData := bytes.Repeat([]byte("A"), payloadSize)
+	/*
+		================ 【学生重点 实验五：对象池准备】 ================
+		sync.Pool 里放的是可以复用的临时 bytes.Buffer。
+		本实验不是改变业务计算，也不是改变请求数量，而是只改变“临时缓冲从哪里来”。
+
+		before 模式：每个请求都 new(bytes.Buffer)。
+		after 模式：从 bufferPool.Get() 取，用完再 Put() 回来。
+		============================================================
+	*/
 	bufferPool := sync.Pool{
 		New: func() any {
 			buf := new(bytes.Buffer)
@@ -59,6 +68,14 @@ func runExperiment(
 
 	jobs := make(chan int, concurrency)
 	var workerWG sync.WaitGroup
+	/*
+		================ 【学生重点 实验五：固定并发度】 ================
+		这里没有一次性启动 numRequests 个 goroutine。
+		而是只启动 concurrency 个 worker，让它们从 jobs 里一条条取请求。
+
+		这样 before 和 after 的并发压力一致，主要差别就剩下“是否使用对象池”。
+		============================================================
+	*/
 	for worker := 0; worker < concurrency; worker++ {
 		workerWG.Add(1)
 		go func() {
@@ -68,9 +85,26 @@ func runExperiment(
 
 				var buf *bytes.Buffer
 				if usePool {
+					/*
+						================ 【学生重点 实验五：优化后 Get】 ================
+						after 模式走这里：
+						1. Get：从对象池取一个旧 Buffer。
+						2. Reset：清掉上次请求留下的内容，但尽量复用底层内存。
+
+						这就是降低 malloc 和 GC 压力的关键写法。
+						==============================================================
+					*/
 					buf = bufferPool.Get().(*bytes.Buffer)
 					buf.Reset()
 				} else {
+					/*
+						================ 【学生重点 实验五：优化前 new】 ================
+						before 模式走这里：
+						每个请求都重新创建一个 bytes.Buffer，并为它准备 payloadSize 大小的空间。
+
+						请求次数很多时，这些临时对象会带来更多内存分配和 GC 压力。
+						==============================================================
+					*/
 					buf = new(bytes.Buffer)
 					buf.Grow(payloadSize)
 				}
@@ -79,6 +113,12 @@ func runExperiment(
 				resultSink[id] = len(buf.Bytes()) + doSomeWork(workIterations)
 
 				if usePool {
+					/*
+						================ 【学生重点 实验五：优化后 Put】 ================
+						请求处理完以后，把 Buffer 放回对象池。
+						下一次请求再 Get 时，就可能复用这块已经申请过的内存。
+						==============================================================
+					*/
 					bufferPool.Put(buf)
 				}
 				latencies[id] = time.Since(begin)

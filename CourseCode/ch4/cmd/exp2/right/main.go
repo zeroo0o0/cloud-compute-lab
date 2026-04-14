@@ -41,6 +41,16 @@ func runOneRound(round int, rng *rand.Rand) []Result {
 			<-startGate
 			time.Sleep(arriveLag)
 
+			/*
+				================ 【学生重点 实验二：Mutex 修复版】 ================
+				请把下面从 Lock 到 Unlock 的范围看成“同一扇门后面的房间”：
+				1. 只有一个玩家能进入这个房间。
+				2. 检查 npc.Active 和修改 npc.Active 必须放在同一个房间里。
+				3. 这样其他玩家就不能在“检查完、还没修改”的缝隙里插进来。
+
+				这段代码对应实验二的修复目标：把“检查 + 修改”合并成一个临界区。
+				================================================================
+			*/
 			npc.mu.Lock()
 			defer npc.mu.Unlock()
 

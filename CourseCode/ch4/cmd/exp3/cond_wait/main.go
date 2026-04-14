@@ -23,6 +23,17 @@ func playerGetTreasure(playerID int, npc *NPC, waiting []atomic.Bool, wakeups []
 	defer wg.Done()
 
 	npc.mu.Lock()
+	/*
+		================ 【学生重点 实验三：Cond 等待】 ================
+		请把下面这段和 busy_wait 版本对照看：
+		1. for npc.Items == 0：库存为空时不要继续往下拿。
+		2. npc.cond.Wait()：释放锁，并让当前玩家睡眠等待。
+		3. 被 Signal 唤醒后，重新回到 for 条件再检查一次库存。
+
+		这里必须用 for，而不是 if。
+		因为被叫醒只代表“可能有变化”，不代表自己一定能拿到宝物。
+		============================================================
+	*/
 	for npc.Items == 0 {
 		waiting[playerID-1].Store(true)
 		fmt.Printf("[等待] 玩家 %d 进入等待队列，释放锁并睡眠。\n", playerID)
@@ -45,6 +56,14 @@ func restock(npc *NPC, amount int) {
 	npc.mu.Unlock()
 
 	fmt.Printf("[系统] NPC 补货 %d 个宝物，当前库存=%d\n", amount, current)
+	/*
+		================ 【学生重点 实验三：Signal 唤醒】 ================
+		补货以后，NPC 不再要求玩家自己反复轮询库存。
+		这里每调用一次 Signal，就叫醒一个正在 Wait 的玩家，让他回去重新检查库存。
+
+		这就是实验三从“忙等消耗 CPU”改成“有货再通知”的关键写法。
+		==============================================================
+	*/
 	for i := 0; i < amount; i++ {
 		npc.cond.Signal()
 	}

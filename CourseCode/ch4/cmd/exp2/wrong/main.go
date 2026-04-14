@@ -40,6 +40,18 @@ func runOneRound(round int, rng *rand.Rand) []Result {
 			<-startGate
 			time.Sleep(arriveLag)
 
+			/*
+				================ 【学生重点 实验二：无锁错误版】 ================
+				请只看下面这段“先检查、后修改”：
+				1. if !npc.Active：玩家先判断宝物是不是还在。
+				2. time.Sleep(pickupCost)：模拟拾取动作需要一点时间。
+				3. npc.Active = true：玩家最后才把宝物标记为“已经被拿走”。
+
+				问题就在第 1 步和第 3 步之间：
+				多个玩家可能同时看到 npc.Active 还是 false，于是都进入拾取流程。
+				这就是《英雄集结演示实验.md》实验二要观察的“唯一宝物被重复领取”。
+				==============================================================
+			*/
 			if !npc.Active {
 				fmt.Printf("[第%d轮] 玩家 %d 看到宝物仍在，准备拾取 (到达偏移=%s, 拾取耗时=%s)\n",
 					round, playerID, arriveLag, pickupCost)

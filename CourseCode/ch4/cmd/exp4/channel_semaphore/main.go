@@ -28,6 +28,14 @@ type demoState struct {
 
 func newDemoState(total int, limit int, workTime time.Duration) *demoState {
 	return &demoState{
+		/*
+			================ 【学生重点 实验四：Channel 信号量】 ================
+			这里的 limit 就是“最多允许几个人同时进副本”。
+			Channel 容量是 3，就代表最多只能同时放进 3 个 Worker。
+
+			后面谁想开始工作，必须先往 semaphore 里放一个 struct{}{} 当许可证。
+			================================================================
+		*/
 		semaphore:  make(chan struct{}, limit),
 		total:      total,
 		workTime:   workTime,
@@ -49,6 +57,15 @@ func (d *demoState) dispatch(count int) {
 			defer d.wg.Done()
 
 			fmt.Printf("[Worker %d] 已入场，尝试获取许可...\n", id)
+			/*
+				================ 【学生重点 实验四：获取与释放许可】 ================
+				请只看下面两行对 semaphore 的操作：
+				1. d.semaphore <- struct{}{}：获取许可。Channel 满了就会阻塞。
+				2. <-d.semaphore：释放许可。释放后，排队的 Worker 才能继续。
+
+				所以即使 wave 一次放进很多 Worker，真正同时工作的也不会超过 cap(d.semaphore)。
+				==================================================================
+			*/
 			d.semaphore <- struct{}{}
 			fmt.Printf("[Worker %d] 获取许可，当前占用=%d/%d\n", id, len(d.semaphore), cap(d.semaphore))
 			time.Sleep(d.workTime)

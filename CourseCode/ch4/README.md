@@ -17,9 +17,13 @@ ch4/
 │   └── exp6demo/demo.go                # 实验6共享：Redis/PostgreSQL 初始化与数据操作
 └── cmd/
     ├── README.md                       # cmd 子目录索引
-    ├── exp1/network_serial_server_demo/     # ① 网络串行收包
-    ├── exp1/network_goroutine_server_demo/  # ① goroutine 并发收包
-    ├── exp1/network_event_driven_sync_demo/ # ① 事件驱动 + 增量同步
+    ├── exp1/README.md                       # ① 实验一讲解顺序与知识点代码位置
+    ├── exp1/01_basic_serial_blocking_demo/  # ①-1 最小原理：串行阻塞
+    ├── exp1/02_network_serial_warzone/      # ①-2 Warzone 嵌入：串行收包反例
+    ├── exp1/03_basic_goroutine_receiver_demo/ # ①-3 最小原理：goroutine 收包
+    ├── exp1/04_network_goroutine_warzone/   # ①-4 Warzone 嵌入：goroutine 收包
+    ├── exp1/05_basic_event_driven_demo/     # ①-5 最小原理：事件驱动
+    ├── exp1/06_network_event_driven_warzone/ # ①-6 Warzone 嵌入：事件驱动 + 增量同步
     ├── exp2/wrong/                     # ② 无锁竞态错误版
     ├── exp2/right/                     # ② Mutex 修复版
     ├── exp3/busy_wait/                 # ③ 忙等错误版
@@ -167,56 +171,66 @@ docker exec -it ch4-postgres psql -U 你的用户名 -d postgres -c "SELECT conf
 
 **知识点**：串行阻塞、goroutine 并发解耦、事件驱动、增量同步。
 
-**实验功能**：用 4 个独立客户端模拟玩家输入，其中玩家 4 注入高延迟，观察服务器串行收包如何造成“卡顿传染”；随后用 goroutine 收包和事件驱动同步做对照。
+**实验功能**：先用最小代码讲清楚“串行等待、goroutine 解耦、事件驱动”的因果关系，再把同一个写法嵌入 Warzone 的极简游戏场景。游戏嵌入版压缩为“玩家 ACTION -> 权威 PlayerState -> STATE_UPDATE”，只保留 `fast`（疾风游侠）和 `slow`（断流骑士）两名玩家，便于观察慢连接如何影响或不影响快玩家。
 
-#### 演示 1：网络串行收包
+**详细讲解**：见 `cmd/exp1/README.md`，其中标明了每个知识点对应哪一块代码。
+
+#### 演示 1：串行阻塞
 
 ```powershell
-# 终端1：服务端
-go run ./cmd/exp1/network_serial_server_demo server
+# 第一步：最小原理演示
+go run ./cmd/exp1/01_basic_serial_blocking_demo
 
-# 终端2~5：4 个客户端
-go run ./cmd/exp1/network_serial_server_demo client -player 1
-go run ./cmd/exp1/network_serial_server_demo client -player 2
-go run ./cmd/exp1/network_serial_server_demo client -player 3
-go run ./cmd/exp1/network_serial_server_demo client -player 4 -latency-ms 500
+# 终端1：服务端
+go run ./cmd/exp1/02_network_serial_warzone/server
+
+# 终端2：快玩家
+go run ./cmd/exp1/02_network_serial_warzone/client -player fast
+
+# 终端3：慢玩家
+go run ./cmd/exp1/02_network_serial_warzone/client -player slow
 ```
 
 **观察点**：
 
-- `Frame 1` 按 `1,2,3,4` 顺序读取，慢玩家通常拖慢本帧末尾。
-- `Frame 2` 按 `4,1,2,3` 顺序读取，玩家 1/2/3 会出现明显 `额外排队`。
-- 结论是：玩家本身不慢，也可能被服务器串行等待慢连接拖住。
+- 最小演示中，fast 本身只需要 20ms，但主循环先调用 slow 的读取逻辑，所以 fast 也被拖慢。
+- 游戏嵌入版中，服务端 `runFrameSerial` 先读 `slow` 的 ACTION 再读 `fast` 的 ACTION，复现“慢玩家拖住后面的玩家输入”。
 
 #### 演示 2：goroutine 并发收包
 
 ```powershell
-# 终端1：服务端
-go run ./cmd/exp1/network_goroutine_server_demo server
+# 第一步：最小原理演示
+go run ./cmd/exp1/03_basic_goroutine_receiver_demo
 
-# 终端2~5：4 个客户端
-go run ./cmd/exp1/network_goroutine_server_demo client -player 1
-go run ./cmd/exp1/network_goroutine_server_demo client -player 2
-go run ./cmd/exp1/network_goroutine_server_demo client -player 3
-go run ./cmd/exp1/network_goroutine_server_demo client -player 4 -latency-ms 500
+# 终端1：服务端
+go run ./cmd/exp1/04_network_goroutine_warzone/server
+
+# 终端2：快玩家
+go run ./cmd/exp1/04_network_goroutine_warzone/client -player fast
+
+# 终端3：慢玩家
+go run ./cmd/exp1/04_network_goroutine_warzone/client -player slow
 ```
 
-**观察点**：主循环很快完成收包任务分发；慢客户端仍会晚到，但被隔离在自己的 goroutine 中，不再卡住主循环。
+**观察点**：主循环很快完成收包任务分发；slow 仍会晚到，但被隔离在自己的连接 goroutine 中，不再阻止 fast 的 ACTION 先被应用到权威世界状态。
 
 #### 演示 3：事件驱动 + 增量同步
 
 ```powershell
-# 终端1：服务端
-go run ./cmd/exp1/network_event_driven_sync_demo server
+# 第一步：最小原理演示
+go run ./cmd/exp1/05_basic_event_driven_demo
 
-# 终端2~5：4 个客户端
-go run ./cmd/exp1/network_event_driven_sync_demo client -player 1
-go run ./cmd/exp1/network_event_driven_sync_demo client -player 2
-go run ./cmd/exp1/network_event_driven_sync_demo client -player 3
-go run ./cmd/exp1/network_event_driven_sync_demo client -player 4 -delay-ms 500
+# 终端1：服务端
+go run ./cmd/exp1/06_network_event_driven_warzone/server
+
+# 终端2：快玩家
+go run ./cmd/exp1/06_network_event_driven_warzone/client -player fast
+
+# 终端3：慢玩家
+go run ./cmd/exp1/06_network_event_driven_warzone/client -player slow
 ```
 
-**观察点**：服务器按 tick 前进，只处理到达时间不晚于当前 tick 边界的事件；增量同步只打印发生变化的玩家。
+**观察点**：服务器按 tick 前进，只处理已经到达的 ACTION；没有 ACTION 时不等待；增量 `STATE_UPDATE` 只同步发生变化的玩家。
 
 ---
 
