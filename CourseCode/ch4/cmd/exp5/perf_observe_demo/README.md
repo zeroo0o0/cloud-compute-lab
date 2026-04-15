@@ -47,7 +47,7 @@
 最短命令顺序如下：
 
 ```powershell
-cd E:\work\cloud-compute-book-code\CourseCode\ch4
+cd .\CourseCode\ch4
 
 go test ./cmd/exp5/perf_observe_demo -run '^$' -bench . -benchmem
 
@@ -157,6 +157,8 @@ go tool pprof -http=:8081 cpu_bad.prof
 ```powershell
 go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkCPUHotspotGood -benchtime 2s -cpuprofile cpu_good.prof
 go tool pprof -top cpu_good.prof
+
+go tool pprof -http=:8082 cpu_good.prof
 ```
 
 ### 4. 课堂上重点怎么讲
