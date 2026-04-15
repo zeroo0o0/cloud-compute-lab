@@ -1,48 +1,85 @@
 # 性能观测工具实验指导
 
-## 一、实验定位
+这个实验不是为了“跑一个 benchmark 就结束”，而是为了带学生完整走一遍：
 
-- **实验主题：** 性能观测工具演示
-- **适用章节：** 第四章实验五“高并发性能榨取”
-- **核心目标：** 使用 Go 自带的 benchmark 与 pprof 工具，分别定位 CPU 热点、内存分配、锁竞争与 goroutine 泄漏问题，并通过错误版 / 修复版对照理解常见优化思路。
+1. 先制造一个性能问题。
+2. 再用工具把问题抓出来。
+3. 然后对照错误版 / 修复版，说明为什么会慢。
 
-本目录中的示例均为教学用最小样例，不追求业务复杂度，重点在于完整呈现“发现问题、采集数据、定位瓶颈、修改代码、再次验证”的基本流程。
+本目录一共覆盖 4 类常见问题：
 
-## 二、目录说明
+- CPU 热点
+- 内存分配过多
+- 锁竞争
+- goroutine 泄漏
 
-- `workload.go`：包含 CPU、内存分配、锁竞争三类问题的错误版与修复版代码。
-- `benchmark_test.go`：包含三组 benchmark，用于生成 CPU、Heap、Mutex 观测数据。
-- `main.go`：提供 goroutine 泄漏与修复版 HTTP 观测入口。
+---
+
+## 一、目录里几个文件分别做什么
+
+- `workload.go`
+  放了三类“错误版 / 修复版”业务函数：CPU、内存分配、锁竞争。
+- `benchmark_test.go`
+  放了 benchmark 入口。`go test -bench ...` 跑的就是这里。
+- `main.go`
+  单独负责 goroutine 泄漏演示，因为它需要启动一个带 `pprof` 的 HTTP 服务，方便浏览器和 `go tool pprof` 在线抓取。
 
 对应关系如下：
 
-| 问题类型 | 反例函数 | 修复函数 | 观测入口 |
+| 问题类型 | 错误版 | 修复版 | 入口 |
 | --- | --- | --- | --- |
 | CPU 热点 | `buildRankDigestSlow` | `buildRankDigestFast` | `BenchmarkCPUHotspotBad/Good` |
 | 内存分配 | `encodeBattleLogBad` | `encodeBattleLogGood` | `BenchmarkHeapAllocBad/Good` |
 | 锁竞争 | `mergeRoomDamageBad` | `mergeRoomDamageGood` | `BenchmarkMutexContentionBad/Good` |
 | goroutine 泄漏 | `-mode leak` | `-mode fixed` | `go run ./cmd/exp5/perf_observe_demo` |
 
+---
+
+## 二、上课时建议怎么演示
+
+如果课堂时间有限，建议按这个顺序：
+
+1. 先跑一遍总 benchmark，让学生知道“确实有慢和快的差别”。
+2. 再挑一个 CPU profile，讲怎么找热点函数。
+3. 再挑一个 heap / mutex profile，讲怎么把“慢”翻译成“分配多”或“锁竞争重”。
+4. 最后演示 goroutine 泄漏，让学生看到在线观测的效果。
+
+最短命令顺序如下：
+
+```powershell
+cd E:\work\cloud-compute-book-code\CourseCode\ch4
+
+go test ./cmd/exp5/perf_observe_demo -run '^$' -bench . -benchmem
+
+go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkCPUHotspotBad -benchtime 2s -cpuprofile cpu_bad.prof
+go tool pprof -top cpu_bad.prof
+
+go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkMutexContentionBad -benchtime 2s -mutexprofile mutex_bad.prof -mutexprofilefraction=1
+go tool pprof -top mutex_bad.prof
+
+go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 60
+```
+
+---
+
 ## 三、环境准备
 
-### 1. Go 工具链检查
-
-进入章节目录：
+### 1. 进入章节目录
 
 ```powershell
 cd E:\work\cloud-compute-book-code\CourseCode\ch4
 ```
 
-检查 Go 与 pprof 是否可用：
+### 2. 检查 Go 和 pprof
 
 ```powershell
 go version
 go tool pprof -h
 ```
 
-### 2. Graphviz 安装
+### 3. 检查 Graphviz
 
-若需要使用 `go tool pprof -http=:8081` 打开火焰图网页，需预先安装 Graphviz。
+如果你要用网页端火焰图，最好先装 Graphviz。
 
 Windows：
 
@@ -50,202 +87,308 @@ Windows：
 winget install --id Graphviz.Graphviz -e
 ```
 
-若 `winget` 由于代理、证书或源同步问题不可用，可改用 Graphviz 官方安装包或官方 zip 包。
+如果 `winget` 下载不了，也可以跳过网页端，只用 `go tool pprof -top` 一样可以完成课堂演示。
 
-macOS：
-
-```bash
-brew install graphviz
-```
-
-Ubuntu / Debian：
-
-```bash
-sudo apt-get update
-sudo apt-get install -y graphviz
-```
-
-安装完成后执行：
+安装完成后检查：
 
 ```powershell
 dot -V
 ```
 
-## 四、工具与指标对照
+---
 
-| 瓶颈类型 | 推荐工具 | 核心命令 | 重点指标 |
-| --- | --- | --- | --- |
-| CPU 热点 | `pprof CPU` | `go test -cpuprofile` | Top 函数、火焰图 |
-| 内存分配 | `testing.B + benchmem + pprof heap` | `go test -benchmem -memprofile` | `B/op`、`allocs/op` |
-| 锁竞争 | `pprof mutex` | `go test -mutexprofile` | 阻塞时间集中位置 |
-| goroutine 泄漏 | `net/http/pprof` | `go run` + `/debug/pprof/goroutine` | goroutine 数量趋势、阻塞栈 |
+## 四、先跑一遍总 benchmark
 
-## 五、实验内容与操作步骤
+```powershell
+go test ./cmd/exp5/perf_observe_demo -run '^$' -bench . -benchmem
+```
 
-### （一）CPU 热点观测
+你会看到类似下面几类信息：
 
-- **问题场景：** 排行榜摘要计算中，将排序逻辑放入高频循环，导致重复计算。
-- **目标函数：** `buildRankDigestSlow` / `buildRankDigestFast`
-- **核心代码位置：** `workload.go:15-40`
+- `ns/op`
+  每次操作平均花多少纳秒。越小越快。
+- `B/op`
+  每次操作平均分配多少字节。越小越省内存。
+- `allocs/op`
+  每次操作平均发生多少次内存分配。越小越好。
 
-操作步骤：
+课堂里可以先只讲一句：
 
-1. 运行错误版 benchmark 并采集 CPU profile。
+- CPU 问题主要看 `ns/op`
+- 内存问题主要看 `B/op` 和 `allocs/op`
+- 后面再用 `pprof` 去看“到底慢在谁身上”
+
+---
+
+## 五、CPU 热点观测
+
+### 1. 先抓错误版
 
 ```powershell
 go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkCPUHotspotBad -benchtime 2s -cpuprofile cpu_bad.prof
 go tool pprof -top cpu_bad.prof
 ```
 
-2. 如需展示火焰图，可执行：
+这里要讲的核心是：
+
+- `buildRankDigestSlow` 把排序放在高频路径里重复做了。
+- 所以热点会集中到排序相关逻辑。
+
+### 2. 如果要开网页端
 
 ```powershell
 go tool pprof -http=:8081 cpu_bad.prof
 ```
 
-3. 重点观察 `sort.Strings`、排序相关调用以及 `buildRankDigestSlow` 是否位于热点区域。
-4. 运行修复版并再次对比结果。
+注意这里推荐写：
+
+```powershell
+-http=:8081
+```
+
+不要写成：
+
+```powershell
+-http=127.0.0.1:8081
+```
+
+### 3. 再抓修复版
 
 ```powershell
 go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkCPUHotspotGood -benchtime 2s -cpuprofile cpu_good.prof
 go tool pprof -top cpu_good.prof
-go tool pprof -http=:8081 cpu_good.prof
 ```
 
-- **预期现象：** 修复版应将排序移出热路径，CPU 时间占比明显下降。
-- **阅读代码时建议重点查看：**
-  - `buildRankDigestSlow`：`workload.go:15-30`
-  - `buildRankDigestFast`：`workload.go:32-40`
+### 4. 课堂上重点怎么讲
 
-### （二）内存分配观测
+- 错误版慢，不是因为“Go 慢”，而是因为重复排序。
+- 修复版快，不是因为“用了黑科技”，而是因为把重复工作移出了热路径。
 
-- **问题场景：** 日志编码过程中，每次处理事件都创建新的 `bytes.Buffer`，造成较多短命对象。
-- **目标函数：** `encodeBattleLogBad` / `encodeBattleLogGood`
-- **核心代码位置：** `workload.go:43-67`
+---
 
-操作步骤：
+## 六、内存分配观测
 
-1. 运行错误版 benchmark，并同时输出 `benchmem` 与 heap profile。
+### 1. 抓错误版
 
 ```powershell
 go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkHeapAllocBad -benchmem -memprofile heap_bad.prof
 go tool pprof -top -alloc_space heap_bad.prof
-go tool pprof -http=:8081 -alloc_space heap_bad.prof
 ```
 
-2. 先观察 benchmark 输出中的 `B/op` 与 `allocs/op`。
-3. 再观察 heap profile 中是否集中出现 `bytes.Buffer`、`fmt.Fprintf` 与 `encodeBattleLogBad`。
-4. 运行修复版并对比分配数据。
+如果想开网页端：
+
+```powershell
+go tool pprof -http=:8082 -alloc_space heap_bad.prof
+```
+
+### 2. 先看 benchmark 输出
+
+这里最该讲的是两列：
+
+- `B/op`
+  每次操作一共分配了多少内存。
+- `allocs/op`
+  每次操作分配了多少次。
+
+如果错误版里每次都新建 `bytes.Buffer`，这两项通常都会比较高。
+
+### 3. 再抓修复版
 
 ```powershell
 go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkHeapAllocGood -benchmem -memprofile heap_good.prof
 go tool pprof -top -alloc_space heap_good.prof
-go tool pprof -http=:8081 -alloc_space heap_good.prof
 ```
 
-- **预期现象：** 修复版复用缓冲区后，`allocs/op` 与 `B/op` 应明显下降。
-- **阅读代码时建议重点查看：**
-  - `encodeBattleLogBad`：`workload.go:43-57`
-  - `encodeBattleLogGood`：`workload.go:59-67`
+### 4. 课堂上重点怎么讲
 
-### （三）锁竞争观测
+- 这里不是“逻辑错了”，而是“分配太频繁了”。
+- 频繁创建短命对象，会抬高 GC 压力。
+- 修复版通过复用缓冲区，让 `allocs/op` 和 `B/op` 都下降。
 
-- **问题场景：** 多个 worker 并发更新房间总伤害时，每次更新都进入同一临界区。
-- **目标函数：** `mergeRoomDamageBad` / `mergeRoomDamageGood`
-- **核心代码位置：** `workload.go:70-118`
+---
 
-操作步骤：
+## 七、锁竞争观测
 
-1. 运行错误版 benchmark 并采集 mutex profile。
+### 1. 抓错误版
 
 ```powershell
 go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkMutexContentionBad -benchtime 2s -mutexprofile mutex_bad.prof -mutexprofilefraction=1
 go tool pprof -top mutex_bad.prof
-go tool pprof -http=:8081 mutex_bad.prof
 ```
 
-2. 重点观察 `sync.(*Mutex).Lock` 与 `mergeRoomDamageBad` 是否集中占用阻塞时间。
-3. 运行修复版并对比。
+如果想开网页端：
+
+```powershell
+go tool pprof -http=:8083 mutex_bad.prof
+```
+
+### 2. 这里该看什么
+
+这类 profile 不是看“谁算得最久”，而是看：
+
+- 谁因为锁被挡住了
+- 阻塞时间主要堆在哪一段临界区
+
+### 3. 再抓修复版
 
 ```powershell
 go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkMutexContentionGood -benchtime 2s -mutexprofile mutex_good.prof -mutexprofilefraction=1
 go tool pprof -top mutex_good.prof
-go tool pprof -http=:8081 mutex_good.prof
 ```
 
-- **预期现象：** 修复版采用“本地累计、一次合并”的方式后，锁竞争时间应明显减少。
-- **阅读代码时建议重点查看：**
-  - `mergeRoomDamageBad`：`workload.go:70-95`
-  - `mergeRoomDamageGood`：`workload.go:97-118`
+### 4. 课堂上重点怎么讲
 
-### （四）goroutine 泄漏观测
+- 错误版的问题，不是“有锁就不行”，而是“锁拿得太碎、太频繁”。
+- 修复版把很多次小更新变成“本地累计后统一合并”，所以锁竞争明显下降。
 
-- **问题场景：** 程序持续创建 goroutine，但未提供有效退出路径，导致协程数量不断增长。
-- **运行模式：** `-mode leak` / `-mode fixed`
-- **核心代码位置：** `main.go:13-57`，入口位于 `main.go:59-98`
+---
 
-操作步骤：
+## 八、goroutine 泄漏观测
 
-1. 启动错误版：
+这一段最容易因为操作顺序错而失败，所以建议严格按下面两终端的顺序演示。
+
+### 终端 1：先启动 leak 版
 
 ```powershell
-go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 20
+go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 60
 ```
 
-2. 在另一终端中采集 goroutine profile：
+你应该先看到这一行：
+
+```text
+[pprof] HTTP 服务已启动，正在监听 127.0.0.1:6060
+```
+
+只有看到这行以后，才去开第二个终端。
+
+同时终端 1 会不断打印：
+
+```text
+[状态] goroutines=3
+[状态] goroutines=23
+[状态] goroutines=44
+...
+```
+
+这表示 goroutine 数量在持续上涨。
+
+### 终端 2：抓 goroutine profile
 
 ```powershell
 go tool pprof -top http://127.0.0.1:6060/debug/pprof/goroutine
-go tool pprof -http=:8081 http://127.0.0.1:6060/debug/pprof/goroutine
 ```
 
-或直接查看文本栈：
+如果要开网页端：
+
+```powershell
+go tool pprof -http=:8084 http://127.0.0.1:6060/debug/pprof/goroutine
+```
+
+如果想直接看文字栈：
 
 ```powershell
 (Invoke-WebRequest http://127.0.0.1:6060/debug/pprof/goroutine?debug=1).Content
 ```
 
-3. 观察 goroutine 总数是否持续上升，以及阻塞栈是否反复落在同一段等待代码上。
-4. 运行修复版并再次对比：
+### 这里为什么网页端不一定像 CPU 火焰图那样直观
+
+因为 goroutine profile 的重点不是“谁最耗 CPU”，而是：
+
+- 当前有哪些 goroutine
+- 它们卡在什么地方
+- 数量有没有一直涨
+
+所以课堂上更推荐这样讲：
+
+1. 先看终端 1 的 goroutine 数量趋势。
+2. 再看 `pprof -top`，确认大量 goroutine 落在同一段等待逻辑。
+3. 如果想给学生看更原始的证据，再用 `?debug=1` 看文本栈。
+
+### 再跑 fixed 版
 
 ```powershell
-go run ./cmd/exp5/perf_observe_demo -mode fixed -seconds 20
+go run ./cmd/exp5/perf_observe_demo -mode fixed -seconds 60
 ```
 
-- **预期现象：** 错误版的 goroutine 数量会持续增长；修复版的 goroutine 能够正常结束，数量保持稳定。
-- **阅读代码时建议重点查看：**
-  - `startLeakDemo`：`main.go:13-34`
-  - `startFixedDemo`：`main.go:36-57`
-  - `main`：`main.go:59-98`
+这时 goroutine 数量会保持稳定，不会一直往上长。
 
-## 六、建议演示顺序
+### 如果出现 `actively refused it`
 
-若课堂时间有限，可按以下顺序进行：
+通常是下面几种原因：
+
+- 第一个终端里的 `go run` 还没真正监听成功。
+- 第一个终端已经超时退出了。
+- `6060` 端口被别的程序占用了。
+- 你在第二个终端抓得太快了。
+
+这时最稳的做法是换个端口重来：
 
 ```powershell
-go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkCPUHotspotBad -benchtime 2s -cpuprofile cpu_bad.prof
-go tool pprof -top cpu_bad.prof
-
-go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkHeapAllocBad -benchmem
-
-go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkMutexContentionBad -benchtime 2s -mutexprofile mutex_bad.prof -mutexprofilefraction=1
-go tool pprof -top mutex_bad.prof
-
-go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 20
+go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 60 -addr 127.0.0.1:6061
+go tool pprof -top http://127.0.0.1:6061/debug/pprof/goroutine
+go tool pprof -http=:8085 http://127.0.0.1:6061/debug/pprof/goroutine
 ```
 
-该顺序能够覆盖 PPT 中的四类典型瓶颈，并能在有限时间内完成“现象、工具、指标、修复思路”的完整展示。
+---
 
-## 七、成功标准
+## 九、每个输出到底表示什么
 
-- 能够正确运行 benchmark 与 pprof 相关命令。
-- 能够指出 CPU profile 中的热点函数位置。
-- 能够根据 `benchmem` 输出识别高分配来源。
-- 能够根据 mutex profile 说明阻塞主要集中在哪一段临界区代码。
-- 能够根据 goroutine profile 或文本栈判断是否存在协程泄漏。
-- 能够说明错误版与修复版在性能观测结果上的差异。
+### 1. `go test -bench ... -benchmem`
 
-## 八、实验结束后的清理
+- `ns/op`
+  平均一次操作花多久。
+- `B/op`
+  平均一次操作分配多少字节。
+- `allocs/op`
+  平均一次操作分配多少次对象。
+
+### 2. `go tool pprof -top`
+
+这是“按消耗排序的函数列表”。
+
+课堂上只需要让学生先学会看两件事：
+
+- 排名前几的函数是谁
+- 这些函数是不是正好就是你怀疑的问题点
+
+### 3. `go tool pprof -http=:端口`
+
+这是网页端浏览器视图，可以看调用图、火焰图、Top。
+
+它更适合“展示”，
+`-top` 更适合“快速定位”。
+
+### 4. `goroutine?debug=1`
+
+这是最直白的文字证据：
+
+- 当前一共有多少 goroutine
+- 每批 goroutine 卡在哪个调用栈
+
+---
+
+## 十、课堂上一句话总结四类问题
+
+- CPU 热点：同样的活做太多次了。
+- 内存分配：短命对象建得太频繁了。
+- 锁竞争：大家都挤在同一个临界区门口。
+- goroutine 泄漏：任务结束了，但协程没退出。
+
+---
+
+## 十一、我建议你实际演示时这样收尾
+
+每演示完一类问题，都让学生回答这三个问题：
+
+1. 现象是什么？
+2. 工具里哪个指标证明了这个现象？
+3. 代码里哪种写法导致了这个现象？
+
+这样学生记住的就不只是命令，而是“代码写法 -> 运行现象 -> 观测证据”这条链条。
+
+---
+
+## 十二、实验结束后清理 profile 文件
 
 ```powershell
 Remove-Item cpu_bad.prof,cpu_good.prof,heap_bad.prof,heap_good.prof,mutex_bad.prof,mutex_good.prof -ErrorAction SilentlyContinue

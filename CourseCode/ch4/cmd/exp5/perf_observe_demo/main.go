@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"runtime"
@@ -63,14 +64,22 @@ func main() {
 	flag.Parse()
 
 	stop := make(chan struct{})
+	ln, err := net.Listen("tcp", *addr)
+	if err != nil {
+		fmt.Printf("[pprof] 监听 %s 失败: %v\n", *addr, err)
+		fmt.Println("[pprof] 如果 6060 被占用，可改用: go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 60 -addr 127.0.0.1:6061")
+		return
+	}
+	defer ln.Close()
 	go func() {
-		if err := http.ListenAndServe(*addr, nil); err != nil {
+		if err := http.Serve(ln, nil); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("[pprof] HTTP server stopped: %v\n", err)
 		}
 	}()
 
 	fmt.Println("=== 实验五：goroutine 性能观测演示 ===")
 	fmt.Printf("mode=%s, pprof=http://%s/debug/pprof/, duration=%ds\n", *mode, *addr, *seconds)
+	fmt.Printf("[pprof] HTTP 服务已启动，正在监听 %s\n", *addr)
 	fmt.Println("建议另开一个终端执行：")
 	fmt.Printf("  go tool pprof -top http://%s/debug/pprof/goroutine\n", *addr)
 	fmt.Printf("  PowerShell: (Invoke-WebRequest http://%s/debug/pprof/goroutine?debug=1).Content\n\n", *addr)

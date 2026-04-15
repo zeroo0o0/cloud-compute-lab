@@ -445,11 +445,14 @@ go test ./cmd/exp5/perf_observe_demo -run '^$' -bench . -benchmem
 go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkCPUHotspotBad -benchtime 2s -cpuprofile cpu_bad.prof
 go tool pprof -top cpu_bad.prof
 
+# 网页端建议写法
+go tool pprof -http=:8081 cpu_bad.prof
+
 # goroutine profile HTTP 观测
 go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 20
 ```
 
-**观察点**：用 `BenchmarkCPUHotspotBad/Good` 对比 CPU 热点优化；用 `BenchmarkHeapAllocBad/Good` 对比 `allocs/op`；用 `BenchmarkMutexContentionBad/Good` 和 `-mutexprofile` 观察锁竞争；用 `-mode leak/fixed` 观察 goroutine 数量是否持续上涨。
+**观察点**：用 `BenchmarkCPUHotspotBad/Good` 对比 CPU 热点优化；用 `BenchmarkHeapAllocBad/Good` 对比 `allocs/op`；用 `BenchmarkMutexContentionBad/Good` 和 `-mutexprofile` 观察锁竞争；用 `-mode leak/fixed` 观察 goroutine 数量是否持续上涨。做 goroutine live 观测时，要先看到第一个终端打印 `[pprof] HTTP 服务已启动`，再去第二个终端执行 `go tool pprof`。
 
 ---
 
