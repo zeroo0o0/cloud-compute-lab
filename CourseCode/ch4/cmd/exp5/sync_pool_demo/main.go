@@ -26,6 +26,10 @@ type stats struct {
 	latencies     []time.Duration
 }
 
+type requestJob struct {
+	id int
+}
+
 func runExperiment(
 	usePool bool,
 	numRequests int,
@@ -66,7 +70,7 @@ func runExperiment(
 	runtime.ReadMemStats(&startMem)
 	start := time.Now()
 
-	jobs := make(chan int, concurrency)
+	jobs := make(chan requestJob, concurrency)
 	var workerWG sync.WaitGroup
 	/*
 		================ 【学生重点 实验五：固定并发度】 ================
@@ -80,8 +84,39 @@ func runExperiment(
 		workerWG.Add(1)
 		go func() {
 			defer workerWG.Done()
-			for id := range jobs {
-				begin := time.Now()
+			const latencyBatchSize = 32
+			batchIDs := make([]int, 0, latencyBatchSize)
+			var batchStart time.Time
+
+			flushBatch := func() {
+				if len(batchIDs) == 0 {
+					return
+				}
+				/*
+					================ 【学生重点 实验五：延迟统计口径】 ================
+					这里不再对“单个请求”直接 time.Now()/Since。
+					原因是 after 模式单次处理太短，在部分机器上会被量成 0ns。
+
+					现在改成：
+					1. 一个 worker 连续处理一小批请求。
+					2. 统计这一整批总耗时。
+					3. 再折算成“平均单请求延迟”写回去。
+
+					这样不会改变 before / after 的业务逻辑，
+					但能避开计时精度太粗导致的“分位数全是 0”问题。
+					==============================================================
+				*/
+				avgLatency := time.Since(batchStart) / time.Duration(len(batchIDs))
+				for _, id := range batchIDs {
+					latencies[id] = avgLatency
+				}
+				batchIDs = batchIDs[:0]
+			}
+
+			for job := range jobs {
+				if len(batchIDs) == 0 {
+					batchStart = time.Now()
+				}
 
 				var buf *bytes.Buffer
 				if usePool {
@@ -110,7 +145,7 @@ func runExperiment(
 				}
 
 				buf.Write(mockData)
-				resultSink[id] = len(buf.Bytes()) + doSomeWork(workIterations)
+				resultSink[job.id] = len(buf.Bytes()) + doSomeWork(workIterations)
 
 				if usePool {
 					/*
@@ -121,13 +156,20 @@ func runExperiment(
 					*/
 					bufferPool.Put(buf)
 				}
-				latencies[id] = time.Since(begin)
+				batchIDs = append(batchIDs, job.id)
+				if len(batchIDs) == latencyBatchSize {
+					flushBatch()
+				}
 			}
+
+			flushBatch()
 		}()
 	}
 
 	for i := 0; i < numRequests; i++ {
-		jobs <- i
+		jobs <- requestJob{
+			id: i,
+		}
 	}
 	close(jobs)
 	workerWG.Wait()
@@ -208,6 +250,7 @@ func main() {
 	fmt.Printf("本次参数: requests=%d, payload=%dKB, work=%d, concurrency=%d\n",
 		*numRequests, *payloadKB, *workIterations, *concurrency)
 	fmt.Println("说明: 把“是否使用对象池”作为核心对照变量，其他参数保持一致。")
+	fmt.Println("延迟口径: 按小批次计时，再折算平均单请求延迟，避免单次计时精度过粗。")
 
 	s := runExperiment(usePool, *numRequests, *payloadKB*1024, *workIterations, *concurrency)
 	if usePool {

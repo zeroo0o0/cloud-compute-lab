@@ -33,6 +33,8 @@ cmd/
 │  ├─ connection_pool_demo/
 │  └─ perf_observe_demo/
 └─ exp6/
+   ├─ write_through_simple_demo/
+   ├─ cache_aside_simple_demo/
    ├─ write_through_demo/
    └─ cache_aside_demo/
 ```
@@ -83,9 +85,11 @@ cmd/
   - 说明：`before` 每次请求都新建临时 `bytes.Buffer`；`after` 使用 `sync.Pool` 复用临时对象；`connection_pool_demo` 用本机 TCP 长连接池演示短连接改成长连接池后如何减少重复建连时间，并显式展示 `maxOpenConns / maxIdleConns / connMaxLifetime` 三项配置；`perf_observe_demo` 提供 CPU、Heap、Mutex、Goroutine 的 pprof 教程，具体命令见该目录 README。
 
 - exp6：游戏数据分层存储架构
+  - `go run ./cmd/exp6/write_through_simple_demo`
+  - `go run ./cmd/exp6/cache_aside_simple_demo`
   - `go run ./cmd/exp6/write_through_demo`
   - `go run ./cmd/exp6/cache_aside_demo`
-  - 说明：`write_through_demo` 演示金币扣减时先写 PostgreSQL 再同步 Redis；`cache_aside_demo` 演示配置数据的缓存未命中、回填、失效与再次命中。运行前需要 Redis、PostgreSQL 和 `PG_DSN` 环境变量。
+  - 说明：`*_simple_demo` 是纯内存简化版，用 map 模拟持久层与缓存层，先讲清“分层、冷热数据、访问顺序”；`write_through_demo` 和 `cache_aside_demo` 是真实 Redis + PostgreSQL 完整版，运行前需要 Redis、PostgreSQL 和 `PG_DSN` 环境变量。
 
 ---
 
@@ -95,5 +99,5 @@ cmd/
 - `exp2` 和 `exp3` 使用“错误版 / 修复版”结构，便于课堂前后对照。
 - `exp4` 将锁代价、Channel 信号量、Channel 超时锁、RWMutex 对照拆成 4 个独立入口。
 - `exp5` 包含对象池、连接池和性能观测工具三个演示；对象池用 `before/after` 模式对比临时对象复用，连接池用本机 TCP server 对比短连接和长连接池，性能观测工具教程覆盖 pprof CPU/Heap/Mutex/Goroutine。
-- `exp6` 将 `Write Through` 和 `Cache Aside` 拆成两个独立程序，避免两种一致性方案混在同一次输出中。
+- `exp6` 现在同时提供“简化版”和“完整版”：简化版先讲架构分层，完整版再连接真实 Redis / PostgreSQL；`Write Through` 和 `Cache Aside` 仍然各自拆成独立入口，避免两种一致性方案混在同一次输出中。
 - exp1 已按教学需要拆分 server/client 入口；旧的 `network_*_demo server/client` 混合入口不再使用。

@@ -1,7 +1,7 @@
 # 英雄集结演示实验 —— 代码与演示说明
 
 > 本目录 (`ch4/`) 是一个**独立的 Go module**，围绕 Go 并发控制、锁机制、对象池优化和分层存储架构，提供 6 组可运行演示程序。
-> 实验 1~5 为本地或本机网络演示；实验 6 使用 Docker 中的 Redis 与 PostgreSQL 演示真实分层存储。
+> 实验 1~5 为本地或本机网络演示；实验 6 同时提供“纯内存简化版”和“Redis + PostgreSQL 完整版”，便于先讲架构分层，再讲真实基础设施。
 
 ---
 
@@ -14,6 +14,7 @@ ch4/
 ├── README.md                           # ← 本文件
 ├── 英雄集结演示实验.md                  # 实验目标与讲解要点
 ├── internal/
+│   ├── exp6simple/demo.go              # 实验6简化版：纯内存持久层/缓存层演示
 │   └── exp6demo/demo.go                # 实验6共享：Redis/PostgreSQL 初始化与数据操作
 └── cmd/
     ├── README.md                       # cmd 子目录索引
@@ -36,6 +37,8 @@ ch4/
     ├── exp5/sync_pool_demo/            # ⑤ sync.Pool 对象池优化
     ├── exp5/connection_pool_demo/      # ⑤ 本机 TCP 连接池演示
     ├── exp5/perf_observe_demo/         # ⑤ 性能观测工具教程
+    ├── exp6/write_through_simple_demo/ # ⑥ Write Through 简化版
+    ├── exp6/cache_aside_simple_demo/   # ⑥ Cache Aside 简化版
     ├── exp6/write_through_demo/        # ⑥ Write Through 演示
     └── exp6/cache_aside_demo/          # ⑥ Cache Aside 演示
 ```
@@ -49,9 +52,9 @@ ch4/
 | 依赖 | 版本 | 说明 |
 |------|------|------|
 | Go | >= 1.21 | 所有实验使用 Go 1.21+ |
-| Docker Desktop | 已安装并启动 | 仅实验 6 需要 |
-| Redis | 7 | 建议使用 Docker 容器 `ch4-redis` |
-| PostgreSQL | 16 | 建议使用 Docker 容器 `ch4-postgres` |
+| Docker Desktop | 已安装并启动 | 仅实验 6 完整版需要 |
+| Redis | 7 | 建议使用 Docker 容器 `ch4-redis`，仅实验 6 完整版需要 |
+| PostgreSQL | 16 | 建议使用 Docker 容器 `ch4-postgres`，仅实验 6 完整版需要 |
 
 ### 首次构建
 
@@ -70,7 +73,19 @@ go build ./...
 
 ## 实验六环境准备
 
-实验 6 不是纯本地模拟，它会连接真实 Redis 和 PostgreSQL。
+实验 6 现在有两组入口：
+
+- 简化版：纯内存模拟持久层和缓存层，不需要 Docker、Redis、PostgreSQL。
+- 完整版：连接真实 Redis 和 PostgreSQL，用来观察真实中间件下的读写路径与一致性。
+
+如果你这节课只想先讲“为什么要分层、冷热数据怎么放、访问路径为什么不同”，直接运行简化版即可：
+
+```powershell
+go run ./cmd/exp6/write_through_simple_demo
+go run ./cmd/exp6/cache_aside_simple_demo
+```
+
+下面这部分环境准备只针对实验 6 的完整版。
 
 ### 1. 启动 Docker Desktop
 
@@ -460,11 +475,20 @@ go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 20
 
 **对应页码**：第 61-63 页
 
-**知识点**：Redis、PostgreSQL、Write Through、Cache Aside。
+**知识点**：分层存储、冷热数据、Write Through、Cache Aside。
 
-**实验功能**：使用真实 Redis 与 PostgreSQL 演示游戏数据分层存储。核心资产用 Write Through 保证双写一致；配置类数据用 Cache Aside 展示缓存未命中、回填、失效与再次命中。
+**实验功能**：先用纯内存简化版讲清楚“持久层 + 缓存层”的职责分工，再用真实 Redis 与 PostgreSQL 演示完整分层存储。核心资产用 Write Through 保证双写顺序；配置类数据用 Cache Aside 展示缓存未命中、回填、失效与再次命中。
 
-#### 演示 1：Write Through
+#### 演示 0：简化版（推荐先讲）
+
+```powershell
+go run ./cmd/exp6/write_through_simple_demo
+go run ./cmd/exp6/cache_aside_simple_demo
+```
+
+**观察点**：不依赖任何容器，只用内存 map 模拟“持久层 / 缓存层”两层结构，先让学生看懂冷热数据放在哪里、读写路径为什么不同。
+
+#### 演示 1：Write Through（完整版）
 
 ```powershell
 go run ./cmd/exp6/write_through_demo
@@ -479,7 +503,7 @@ docker exec -it ch4-postgres psql -U 你的用户名 -d postgres -c "SELECT user
 docker exec -it ch4-redis redis-cli GET gold:player_1
 ```
 
-#### 演示 2：Cache Aside
+#### 演示 2：Cache Aside（完整版）
 
 ```powershell
 go run ./cmd/exp6/cache_aside_demo
@@ -505,7 +529,7 @@ docker exec -it ch4-redis redis-cli GET cfg:drop_rate
 | 3 | 无 | 单机并发演示 |
 | 4 | 无 | 单机并发演示 |
 | 5 | 无 | 单机性能演示 |
-| 6 | Redis + PostgreSQL | 建议通过 Docker 容器启动 |
+| 6 | 简化版无；完整版需要 Redis + PostgreSQL | 建议通过 Docker 容器启动完整版 |
 
 ---
 
