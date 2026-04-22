@@ -1,4 +1,4 @@
-package main
+package exp6demo
 
 import (
 	"context"
@@ -23,21 +23,21 @@ type StorageDemo struct {
 	redis *redis.Client
 }
 
-func defaultRedisAddr() string {
+func DefaultRedisAddr() string {
 	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
 		return addr
 	}
 	return "127.0.0.1:6379"
 }
 
-func defaultPGDSN() string {
+func DefaultPGDSN() string {
 	if dsn := os.Getenv("PG_DSN"); dsn != "" {
 		return dsn
 	}
 	return ""
 }
 
-func newStorageDemo(redisAddr, pgDSN string) (*StorageDemo, error) {
+func NewStorageDemo(redisAddr, pgDSN string) (*StorageDemo, error) {
 	redis.SetLogger(noopRedisLogger{})
 
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
@@ -130,10 +130,21 @@ func (s *StorageDemo) Close() error {
 	return firstErr
 }
 
-func (s *StorageDemo) deductGold(userID string, deductAmount int) error {
+func (s *StorageDemo) DeductGold(userID string, deductAmount int) error {
 	start := time.Now()
 	fmt.Printf("[Write Through] 开始扣除 %s 金币 %d...\n", userID, deductAmount)
 
+	/*
+		================ 【学生重点 实验六：Write Through 核心顺序】 ================
+		金币扣除是强一致场景，请只看下面三步：
+		1. 开 PostgreSQL 事务。
+		2. 在事务里扣金币，并拿到扣完后的 currentGold。
+		3. 提交成功以后，再把 currentGold 写入 Redis。
+
+		关键点：如果 PostgreSQL 写失败，就不会继续更新 Redis。
+		所以 Redis 不会把一个“数据库里没有成功的扣款结果”提前展示给玩家。
+		====================================================================
+	*/
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("开启 PostgreSQL 事务失败: %w", err)
@@ -165,7 +176,7 @@ func (s *StorageDemo) deductGold(userID string, deductAmount int) error {
 	return nil
 }
 
-func (s *StorageDemo) showGoldConsistency(userID string) {
+func (s *StorageDemo) ShowGoldConsistency(userID string) {
 	var dbGold int
 	if err := s.db.QueryRowContext(ctx, `SELECT gold FROM players WHERE user_id = $1`, userID).Scan(&dbGold); err != nil {
 		fmt.Printf("[一致性检查] PostgreSQL 查询失败: %v\n", err)
@@ -181,10 +192,21 @@ func (s *StorageDemo) showGoldConsistency(userID string) {
 	fmt.Printf("[一致性检查] PostgreSQL.gold=%d, Redis.gold=%s\n\n", dbGold, cacheGold)
 }
 
-func (s *StorageDemo) getGameConfig(key string) string {
+func (s *StorageDemo) GetGameConfig(key string) string {
 	start := time.Now()
 	cacheKey := "cfg:" + key
 
+	/*
+		================ 【学生重点 实验六：Cache Aside 读路径】 ================
+		配置数据是读多写少场景，请只看这个读取顺序：
+		1. 先读 Redis。
+		2. 如果命中，直接返回。
+		3. 如果未命中，再读 PostgreSQL。
+		4. 读到以后写回 Redis，下一次就能命中缓存。
+
+		这叫“旁路缓存”：业务代码自己决定什么时候查缓存、什么时候查数据库。
+		==================================================================
+	*/
 	val, err := s.redis.Get(ctx, cacheKey).Result()
 	if err == nil {
 		fmt.Printf("[Cache Aside 读] 缓存命中 %s=%s，耗时=%v\n", key, val, time.Since(start))
@@ -208,10 +230,21 @@ func (s *StorageDemo) getGameConfig(key string) string {
 	return dbVal
 }
 
-func (s *StorageDemo) updateGameConfig(key, newVal string) {
+func (s *StorageDemo) UpdateGameConfig(key, newVal string) {
 	start := time.Now()
 	fmt.Printf("[Cache Aside 写] 开始更新 %s=%s ...\n", key, newVal)
 
+	/*
+		================ 【学生重点 实验六：Cache Aside 写路径】 ================
+		写配置时不要先改 Redis，也不要把新值直接写进 Redis。
+		这里故意做两步：
+		1. 先更新 PostgreSQL。
+		2. 数据库成功以后，删除 Redis 里的旧缓存。
+
+		删除后，下一次读取会 miss，再从 PostgreSQL 读到新值并回填。
+		这就是实验六要讲的“写时失效，读时回填”。
+		==================================================================
+	*/
 	if _, err := s.db.ExecContext(ctx, `
         UPDATE game_configs
         SET config_value = $1
@@ -228,8 +261,27 @@ func (s *StorageDemo) updateGameConfig(key, newVal string) {
 	fmt.Printf("[Cache Aside 写] 更新成功，缓存已失效，耗时=%v\n\n", time.Since(start))
 }
 
-func printRunHints(redisAddr, pgDSN string) {
+func (s *StorageDemo) ShowConfigState(key string) {
+	var dbVal string
+	if err := s.db.QueryRowContext(ctx, `SELECT config_value FROM game_configs WHERE config_key = $1`, key).Scan(&dbVal); err != nil {
+		fmt.Printf("[状态检查] PostgreSQL 查询失败: %v\n", err)
+		return
+	}
+
+	cacheVal, err := s.redis.Get(ctx, "cfg:"+key).Result()
+	switch {
+	case err == nil:
+		fmt.Printf("[状态检查] PostgreSQL.%s=%s, Redis.%s=%s\n\n", key, dbVal, key, cacheVal)
+	case errors.Is(err, redis.Nil):
+		fmt.Printf("[状态检查] PostgreSQL.%s=%s, Redis.%s=<未命中>\n\n", key, dbVal, key)
+	default:
+		fmt.Printf("[状态检查] Redis 查询失败: %v\n", err)
+	}
+}
+
+func PrintRunHints(redisAddr, pgDSN string) {
 	fmt.Println("运行前置条件：")
+	fmt.Println("- 首次拉取代码后，先在 ch4 目录执行 `go mod tidy`。")
 	fmt.Printf("- Redis: %s（建议通过 Docker Desktop 启动）\n", redisAddr)
 	if pgDSN == "" {
 		fmt.Println("- PostgreSQL: 请先在 PowerShell 中设置 PG_DSN 环境变量")
@@ -240,7 +292,10 @@ func printRunHints(redisAddr, pgDSN string) {
 	fmt.Println()
 }
 
-func printInfraHelp() {
+func PrintInfraHelp() {
+	fmt.Println("如果首次运行提示缺少依赖包，请先在 ch4 目录执行：")
+	fmt.Println("go mod tidy")
+	fmt.Println()
 	fmt.Println("Redis 启动示例（先启动 Docker Desktop 再执行）：")
 	fmt.Println(`docker run -d --name ch4-redis -p 6379:6379 redis:7`)
 	fmt.Println()
@@ -251,41 +306,4 @@ func printInfraHelp() {
 	fmt.Println("PostgreSQL 连接串示例：")
 	fmt.Println(`$env:PG_DSN="postgres://你的用户名:你的密码@127.0.0.1:5432/postgres?sslmode=disable"`)
 	fmt.Println("请把示例中的用户名、密码、主机、端口替换成你自己的 PostgreSQL 配置。")
-}
-
-func main() {
-	fmt.Println("=== 实验六：分层存储架构（Redis + PostgreSQL） ===")
-	fmt.Println("目标：使用真实 Redis 与 PostgreSQL 演示 Write Through 和 Cache Aside。")
-
-	redisAddr := defaultRedisAddr()
-	pgDSN := defaultPGDSN()
-	printRunHints(redisAddr, pgDSN)
-	if pgDSN == "" {
-		fmt.Println("[错误] 未设置 PG_DSN。为了避免在代码里写死个人账号密码，实验六要求每位使用者自行配置 PostgreSQL 连接串。")
-		printInfraHelp()
-		return
-	}
-
-	demo, err := newStorageDemo(redisAddr, pgDSN)
-	if err != nil {
-		fmt.Printf("[错误] 初始化基础设施失败：%v\n", err)
-		printInfraHelp()
-		return
-	}
-	defer demo.Close()
-
-	if err := demo.deductGold("player_1", 20); err != nil {
-		fmt.Printf("[错误] Write Through 执行失败：%v\n", err)
-		return
-	}
-	demo.showGoldConsistency("player_1")
-
-	fmt.Println("--- 模拟配置读取与更新 ---")
-	demo.getGameConfig("drop_rate")
-	demo.getGameConfig("drop_rate")
-	demo.updateGameConfig("drop_rate", "2.0")
-	demo.getGameConfig("drop_rate")
-	demo.getGameConfig("drop_rate")
-
-	fmt.Println("[结论] 核心资产适合 Write Through，读多写少的配置数据适合 Cache Aside。")
 }
