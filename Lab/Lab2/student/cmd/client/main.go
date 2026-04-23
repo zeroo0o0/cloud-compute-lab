@@ -206,6 +206,39 @@ func main() {
 	// ║        }                                                          ║
 	// ║    }()                                                            ║
 	// ╚═══════════════════════════════════════════════════════════════════╝
+	go func() {
+		defer close(done)
+		for {
+			msg, err := conn.Receive()
+			if err != nil {
+				addEvent("✨ 极光闪过，你与世界的连接断开了...")
+				drawUI()
+				return
+			}
+			switch msg.Type {
+			case protocol.TypeInit:
+				myPlayerID = msg.YourID
+				addEvent(fmt.Sprintf("🌟 维度传送完成！你的 ID 是: %d", myPlayerID))
+				addEvent("💡 温馨提示：按 '?' 可以随时查看技能秘籍")
+				drawUI()
+			case protocol.TypeBroadcast:
+				updateSnapshot(msg)
+				drawUI()
+			case protocol.TypeEvent:
+				// 加入一点点独特的修饰
+				if !strings.HasPrefix(msg.Text, "📢") {
+					addEvent("⚡ " + msg.Text)
+				} else {
+					addEvent(msg.Text)
+				}
+				drawUI()
+			case protocol.TypeGameOver:
+				addEvent(fmt.Sprintf("🏆 最终审判: %s 获得了胜利！", msg.Winner))
+				drawUI()
+			}
+		}
+	}()
+	
 	keyReader := bufio.NewReader(os.Stdin)
 	for {
 		select {

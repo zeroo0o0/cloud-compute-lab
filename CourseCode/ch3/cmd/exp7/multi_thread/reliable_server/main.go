@@ -11,18 +11,22 @@ import (
 )
 
 const (
-	maxPlayers = 2
-	mapW       = 20
-	mapH       = 10
-	tickRate   = 200 * time.Millisecond
+	maxPlayers        = 2
+	mapW              = 20
+	mapH              = 10
+	tickRate          = 200 * time.Millisecond
+	heartbeatAction   = "heartbeat"
+	playerIdleTimeout = 3 * time.Second
+	recvTimeout       = 500 * time.Millisecond
 )
 
 type player struct {
-	rc     *ch3net.ReliableConn
-	id     int
-	x, y   int
-	hp     int
-	online bool
+	rc       *ch3net.ReliableConn
+	id       int
+	x, y     int
+	hp       int
+	online   bool
+	lastSeen time.Time
 }
 
 type snapshot struct {
@@ -51,46 +55,7 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-func attachPlayer(conn net.Conn, requestedID int) *player {
-	mu.Lock()
-	defer mu.Unlock()
-
-	if requestedID < 0 || requestedID >= len(players) {
-		return nil
-	}
-	p := players[requestedID]
-	if p.online && p.rc != nil {
-		_ = p.rc.Close()
-	}
-	p.rc = ch3net.NewReliableConn(conn)
-	p.online = true
-	return p
-}
-
-func recvWorker(p *player) {
-	for {
-		var msg ch3proto.InputMsg
-		if err := p.rc.Recv(500*time.Millisecond, &msg); err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				continue
-			}
-			mu.Lock()
-			fmt.Printf("[server] player#%d 断开: %v\n", p.id, err)
-			p.online = false
-			p.rc = nil
-			mu.Unlock()
-			return
-		}
-		mu.Lock()
-		if !p.online {
-			mu.Unlock()
-			continue
-		}
-		inputs[p.id] = msg
-		mu.Unlock()
-	}
-}
-
+// applyInput 将一帧输入作用到玩家位置（攻击由战斗逻辑统一处理）。
 func applyInput(p *player, m ch3proto.InputMsg) {
 	switch m.Action {
 	case "left":
@@ -104,6 +69,7 @@ func applyInput(p *player, m ch3proto.InputMsg) {
 	}
 }
 
+// update 推进一帧世界状态：处理输入、结算攻击、清空输入并生成事件文本。
 func update() string {
 	frame++
 	frameInputs := inputs
@@ -147,6 +113,7 @@ func update() string {
 	return event
 }
 
+// makeSnapshot 复制当前世界状态，供广播阶段在锁外发送。
 func makeSnapshot(event string) snapshot {
 	ps := make([]ch3proto.PlayerState, len(players))
 	for i, p := range players {
@@ -155,6 +122,72 @@ func makeSnapshot(event string) snapshot {
 	return snapshot{frame: frame, players: ps, event: event}
 }
 
+// attachPlayer 绑定（或重绑）连接到指定玩家 ID，支持断线重连。
+func attachPlayer(conn net.Conn, requestedID int) *player {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if requestedID < 0 || requestedID >= len(players) {
+		return nil
+	}
+	p := players[requestedID]
+	if p.online && p.rc != nil {
+		_ = p.rc.Close()
+	}
+	p.rc = ch3net.NewReliableConn(conn)
+	p.online = true
+	p.lastSeen = time.Now()
+	return p
+}
+
+// recvWorker 持续接收某个玩家的输入，并写入该玩家对应的输入槽位。
+func recvWorker(p *player) {
+	rc := p.rc
+	for {
+		var msg ch3proto.InputMsg
+		if err := rc.Recv(recvTimeout, &msg); err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				mu.Lock()
+				if p.rc != rc || !p.online {
+					mu.Unlock()
+					return
+				}
+				if time.Since(p.lastSeen) > playerIdleTimeout {
+					fmt.Printf("[server] player#%d heartbeat timeout\n", p.id)
+					p.online = false
+					_ = rc.Close()
+					p.rc = nil
+					mu.Unlock()
+					return
+				}
+				mu.Unlock()
+				continue
+			}
+			mu.Lock()
+			if p.rc == rc {
+				fmt.Printf("[server] player#%d 断开: %v\n", p.id, err)
+				p.online = false
+				p.rc = nil
+			}
+			mu.Unlock()
+			return
+		}
+		mu.Lock()
+		if !p.online || p.rc != rc {
+			mu.Unlock()
+			return
+		}
+		p.lastSeen = time.Now()
+		if msg.Action == heartbeatAction {
+			mu.Unlock()
+			continue
+		}
+		inputs[p.id] = msg
+		mu.Unlock()
+	}
+}
+
+// broadcast 将快照发送给所有在线玩家；发送超时仅丢帧，发送失败则标记离线。
 func broadcast(s snapshot) {
 	state := ch3proto.WorldState{Frame: s.frame, Players: s.players, Event: s.event}
 	type target struct {
@@ -192,6 +225,7 @@ func broadcast(s snapshot) {
 	}
 }
 
+// acceptLoop 持续接入新连接，校验 Join 消息并启动对应玩家输入接收协程。
 func acceptLoop(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
@@ -223,6 +257,7 @@ func acceptLoop(ln net.Listener) {
 	}
 }
 
+// main 启动权威服务器：监听连接、按固定 Tick 更新世界并广播状态。
 func main() {
 	ln, err := net.Listen("tcp", ":9108")
 	if err != nil {

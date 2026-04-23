@@ -45,7 +45,7 @@ func RenderWorldMap(players []ch3proto.PlayerState, width, height int) string {
 	for i := 0; i <= width; i++ {
 		b.WriteByte('-')
 	}
-	b.WriteString("+\n")
+	b.WriteString("+\r\n")
 	for y := 0; y <= height; y++ {
 		b.WriteByte('|')
 		for x := 0; x <= width; x++ {
@@ -65,7 +65,7 @@ func RenderWorldMap(players []ch3proto.PlayerState, width, height int) string {
 			}
 			b.WriteRune(ch)
 		}
-		b.WriteString("|\n")
+		b.WriteString("|\r\n")
 	}
 	b.WriteString("+")
 	for i := 0; i <= width; i++ {
@@ -89,7 +89,7 @@ func FormatWorldState(ws ch3proto.WorldState, width, height int) string {
 		b.WriteString("| ")
 		b.WriteString(ws.Event)
 	}
-	b.WriteString("\n")
+	b.WriteString("\r\n")
 	b.WriteString(RenderWorldMap(ws.Players, width, height))
 	return b.String()
 }
