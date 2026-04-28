@@ -64,31 +64,57 @@ type Message struct {
 	Winner  string       `json:"winner,omitempty"`
 }
 
-// Conn 将 TCP 连接与持久的 JSON 编解码器绑定。
-//
-// 并发安全说明：
-//   - Send 用 sendMu 互斥锁保护，允许多个 Goroutine 同时向同一连接发送消息
-//   - Receive 不加锁，每条连接只有一个 Goroutine 负责读取
+// Conn 将 TCP 连接与异步发送队列绑定。
 type Conn struct {
-	raw     net.Conn
-	encoder *json.Encoder
-	decoder *json.Decoder
-	sendMu  sync.Mutex // 保护 encoder，防止并发 Send 导致数据竞争
+	raw      net.Conn
+	encoder  *json.Encoder
+	decoder  *json.Decoder
+	sendMu   sync.Mutex   // 保护底层写入
+	sendChan chan []byte  // 异步发送队列，存放已序列化的 JSON
+	closeOnce sync.Once
 }
 
 func NewConn(c net.Conn) *Conn {
-	return &Conn{
-		raw:     c,
-		encoder: json.NewEncoder(c),
-		decoder: json.NewDecoder(c),
+	conn := &Conn{
+		raw:      c,
+		encoder:  json.NewEncoder(c),
+		decoder:  json.NewDecoder(c),
+		sendChan: make(chan []byte, 64), // 缓冲区设为 64，防止瞬时堆积
+	}
+	go conn.writeLoop()
+	return conn
+}
+
+// writeLoop 独立协程负责实际的 IO 写入。
+func (c *Conn) writeLoop() {
+	for data := range c.sendChan {
+		c.sendMu.Lock()
+		c.raw.Write(data)
+		// 注意：JSON 编码后通常需要换行符或由 Encoder 处理。
+		// 由于我们将使用 Marshal，这里直接写入并手动补换行（符合 json.Encoder 行为）。
+		c.raw.Write([]byte("\n"))
+		c.sendMu.Unlock()
 	}
 }
 
-// Send 将消息序列化为 JSON 发送。加锁以支持多 Goroutine 并发调用。
+// Send 将消息序列化并尝试放入异步队列。如果队列满则丢弃（针对实时性高的广播）。
 func (c *Conn) Send(msg Message) error {
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
-	return c.encoder.Encode(msg)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	return c.SendRaw(data)
+}
+
+// SendRaw 直接发送预序列化的字节流。
+func (c *Conn) SendRaw(data []byte) error {
+	select {
+	case c.sendChan <- data:
+		return nil
+	default:
+		// 缓冲区满，丢弃该消息（防止慢连接卡住服务器）
+		return nil 
+	}
 }
 
 func (c *Conn) Receive() (Message, error) {
@@ -98,5 +124,8 @@ func (c *Conn) Receive() (Message, error) {
 }
 
 func (c *Conn) Close() {
-	c.raw.Close()
+	c.closeOnce.Do(func() {
+		close(c.sendChan)
+		c.raw.Close()
+	})
 }

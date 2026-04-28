@@ -21,6 +21,7 @@
 package world
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -43,6 +44,7 @@ type Player struct {
 	Alive   bool
 	Kills   int
 	Conn    *protocol.Conn
+	Online  bool // 在线状态，用于生命周期管理
 }
 
 // newPlayer 在随机位置创建玩家，已实现，无需修改。
@@ -57,6 +59,7 @@ func newPlayer(id int, name string, conn *protocol.Conn) *Player {
 		Potions: protocol.MaxPotions,
 		Alive:   true,
 		Conn:    conn,
+		Online:  true,
 	}
 }
 
@@ -128,7 +131,10 @@ func (w *World) RemovePlayer(id int) {
 	// TODO: 加写锁，从 map 中删除 id 对应的玩家
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	delete(w.players, id)
+	if p, ok := w.players[id]; ok {
+		p.Online = false // 标记离线，阻止还在 Sleep 的复活任务执行
+		delete(w.players, id)
+	}
 }
 
 // ╔═════════════════════════════════════════════════════════════════════════╗
@@ -250,8 +256,9 @@ func (w *World) AttackPlayer(attackerID int, broadcastFn func(string)) string {
 		targetName := target.Name
 		go func() {
 			time.Sleep(5 * time.Second)
-			w.respawn(targetID)
-			broadcastFn(fmt.Sprintf("✨ %s 已复活", targetName))
+			if success := w.respawn(targetID); success {
+				broadcastFn(fmt.Sprintf("✨ %s 已复活", targetName))
+			}
 		}()
 		return fmt.Sprintf("⚔️ %s 击败了 %s！", attacker.Name, targetName)
 	}
@@ -281,19 +288,20 @@ func (w *World) HealPlayer(id int) string {
 }
 
 // respawn 在写锁内重置玩家到随机位置并恢复满血（由复活 Goroutine 调用）。
-// 已实现，无需修改。
-func (w *World) respawn(id int) {
+// 返回布尔值代表复活是否成功完成（如果玩家已离线则不复活）。
+func (w *World) respawn(id int) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	p, ok := w.players[id]
-	if !ok {
-		return
+	if !ok || !p.Online {
+		return false
 	}
 	p.X = rand.Intn(protocol.MapWidth)
 	p.Y = rand.Intn(protocol.MapHeight)
 	p.HP = p.MaxHP
 	p.Potions = protocol.MaxPotions
 	p.Alive = true
+	return true
 }
 
 // ╔═════════════════════════════════════════════════════════════════════════╗
@@ -325,8 +333,15 @@ func (w *World) GetSnapshot() []protocol.PlayerInfo {
 
 // ─── 广播辅助（无需修改） ────────────────────────────────────────────────────
 
-// BroadcastAll 向所有在线玩家发送消息。先读锁收集连接，再锁外发送。
+// BroadcastAll 向所有在线玩家分发消息。支持预序列化以优化性能。
 func (w *World) BroadcastAll(msg protocol.Message) {
+	// 优化 1：预序列化
+	data, err := json.Marshal(msg)
+	if err != nil {
+		fmt.Printf("广播序列化失败: %v\n", err)
+		return
+	}
+
 	w.mu.RLock()
 	conns := make([]*protocol.Conn, 0, len(w.players))
 	for _, p := range w.players {
@@ -334,7 +349,19 @@ func (w *World) BroadcastAll(msg protocol.Message) {
 	}
 	w.mu.RUnlock()
 	for _, c := range conns {
-		c.Send(msg)
+		// 优化 1 & 3：使用异步且预序列化的分发
+		c.SendRaw(data)
+	}
+}
+
+// BroadcastSnapshot 立即广播当前世界快照。
+func (w *World) BroadcastSnapshot() {
+	snapshot := w.GetSnapshot()
+	if len(snapshot) > 0 {
+		w.BroadcastAll(protocol.Message{
+			Type:    protocol.TypeBroadcast,
+			Players: snapshot,
+		})
 	}
 }
 
