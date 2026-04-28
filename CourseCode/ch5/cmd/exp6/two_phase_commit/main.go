@@ -49,12 +49,11 @@ func main() {
 func runOne(s exp6_2pc.Scenario, dataDir string) {
 	fmt.Println("============================================================")
 	fmt.Printf("开始场景: %s\n", s)
-	report, err := exp6_2pc.RunScenario(s, dataDir)
+	_, err := exp6_2pc.RunScenario(s, dataDir)
 	if err != nil {
 		fmt.Printf("场景执行失败: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("场景完成: %s | Coordinator=%s | Decision=%s | Workers=%v\n", report.Scenario, report.CoordinatorState, report.Decision, report.WorkerStates)
 }
 
 func waitForEnter(prompt string) {

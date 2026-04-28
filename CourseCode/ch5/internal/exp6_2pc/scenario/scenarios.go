@@ -48,7 +48,7 @@ func runScenarioA(root string) (core.Report, error) {
 
 // B：Worker-B 无响应导致 Phase-1 超时并 ABORT。
 func runScenarioB(root string) (core.Report, error) {
-	r, err := runCore(root, coreSpec{scenario: core.ScenarioWorkerTimeout, workerCount: 2, forceNoRespOnB: true, phase1Timeout: 220 * time.Millisecond, decisionWait: 150 * time.Millisecond})
+	r, err := runCore(root, coreSpec{scenario: core.ScenarioWorkerTimeout, workerCount: 2, forceNoRespOnA: true, noRespReasonA: "东京/丹佛对柏林临时改动转运顺序不满，策略性静默，未返回投票", phase1Timeout: 220 * time.Millisecond, decisionWait: 150 * time.Millisecond})
 	if err != nil {
 		return core.Report{}, err
 	}
@@ -88,6 +88,10 @@ func renderScenarioNormal(r coreResult) {
 		lines = append(lines,
 			utils.CinematicLine{Speaker: "旁白", Text: "教授收齐全部 YES，写入决议 DECISION=COMMIT。"},
 			utils.CinematicLine{Speaker: "教授", Text: "所有人确认完毕，let's ↘ go↗~（GLOBAL-COMMIT）"},
+			utils.CinematicLine{Speaker: "旁白", Text: "第二阶段开始：全体收到 GLOBAL-COMMIT，READY 节点进入提交收束。"},
+			utils.CinematicLine{Speaker: "东京/丹佛", Text: "已收到最终指令，入口组执行提交，状态 READY -> COMMIT。"},
+			utils.CinematicLine{Speaker: "里约", Text: "系统组确认提交完成，状态 READY -> COMMIT。"},
+			utils.CinematicLine{Speaker: "柏林/内罗毕", Text: "印刷组同步提交，状态 READY -> COMMIT。"},
 		)
 	} else {
 		lines = append(lines,
@@ -116,11 +120,15 @@ func renderScenarioA(r coreResult) {
 
 // renderScenarioB 根据超时/决议分支动态渲染“无响应”剧情。
 func renderScenarioB(r coreResult) {
-	lines := []utils.CinematicLine{{Speaker: "教授", Text: "上一轮否决我接受，这一轮按新窗口再投一次。各组回复状态。"}, {Speaker: "东京/丹佛", Text: "入口组仍可执行，给 YES。"}}
+	lines := []utils.CinematicLine{
+		{Speaker: "教授", Text: "柏林刚调整了转运顺序，这一轮重新发起投票。各组回复状态。"},
+		{Speaker: "里约", Text: "系统组确认可执行，我给 YES。"},
+		{Speaker: "东京/丹佛", Text: "这个顺序把入口风险都压在我们这边……我们先不表态。"},
+	}
 	if hasCoreStep(r, "PHASE1_TIMEOUT") || r.decision == core.StateABORT {
 		lines = append(lines,
-			utils.CinematicLine{Speaker: "里约", Text: "...（链路抖动）... 无法稳定回传 ..."},
-			utils.CinematicLine{Speaker: "教授", Text: "未收齐投票，GLOBAL-ABORT。全员回滚，准备下一轮。"},
+			utils.CinematicLine{Speaker: "旁白", Text: "东京/丹佛因不满柏林临时改动，故意保持静默；教授在 WAIT 阶段始终未收齐投票。"},
+			utils.CinematicLine{Speaker: "教授", Text: "Phase-1 等待超时，立即 GLOBAL-ABORT。所有组回滚，下一轮再协调。"},
 		)
 	}
 	lines = append(lines, utils.CinematicLine{Speaker: "旁白", Text: buildStateSummaryLine(r)})
@@ -129,11 +137,14 @@ func renderScenarioB(r coreResult) {
 
 // renderScenarioC 根据是否触发崩溃分支渲染“一阶段崩溃”剧情。
 func renderScenarioC(r coreResult) {
-	lines := []utils.CinematicLine{{Speaker: "教授", Text: "第三轮开始前最后确认：我将发起 VOTE-REQ。"}}
+	lines := []utils.CinematicLine{
+		{Speaker: "教授", Text: "第三轮开始前，我先去外圈收集警察布控情报，马上回来发起 VOTE-REQ。"},
+	}
 	if hasCoreStep(r, "COORD_CRASH_BEFORE_VOTE") {
 		lines = append(lines,
-			utils.CinematicLine{Speaker: "旁白", Text: "主控链路瞬断，教授在发包前离线。"},
-			utils.CinematicLine{Speaker: "里约", Text: "系统组同样 INIT；超时计时器已启动。"},
+			utils.CinematicLine{Speaker: "旁白", Text: "教授外出期间主控终端失联，VOTE-REQ 未能发出。"},
+			utils.CinematicLine{Speaker: "东京/丹佛", Text: "我们在 INIT 呼叫教授确认窗口，但始终没有回应。"},
+			utils.CinematicLine{Speaker: "里约", Text: "系统组也未收到请求，INIT 超时计时器已到点。"},
 		)
 	}
 	lines = append(lines, utils.CinematicLine{Speaker: "旁白", Text: buildStateSummaryLine(r)})
@@ -142,12 +153,12 @@ func renderScenarioC(r coreResult) {
 
 // renderScenarioD 根据是否发生恢复重放动态渲染 D 场景。
 func renderScenarioD(r coreResult) {
-	lines := []utils.CinematicLine{{Speaker: "教授", Text: "收齐 YES，先落盘 DECISION=COMMIT，再统一广播。"}}
+	lines := []utils.CinematicLine{{Speaker: "教授", Text: "收齐 YES，先落盘 DECISION=COMMIT；我去外线确认警力动向，回来立刻广播。"}}
 	hasCrash := hasCoreStep(r, "COORD_CRASH_AFTER_DECISION")
 	hasReplay := hasCoreStep(r, "RECOVER_REPLAY_DONE")
 	if hasCrash {
 		lines = append(lines,
-			utils.CinematicLine{Speaker: "旁白", Text: "决议刚写入，广播尚未发出，主控信号再次中断。"},
+			utils.CinematicLine{Speaker: "旁白", Text: "教授外线联络途中主控信号中断：决议已写盘，但广播还没发出。"},
 			utils.CinematicLine{Speaker: "东京/丹佛", Text: "入口组停在 READY，按协议等待，不擅自推进。"},
 		)
 	}

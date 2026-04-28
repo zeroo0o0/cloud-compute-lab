@@ -40,8 +40,11 @@ type coreSpec struct {
 	scenario    core.Scenario
 	workerCount int
 	// Phase-1 故障注入：拒票 / 无响应
+	forceNoRespOnA bool
 	forceRejectOnB bool
 	forceNoRespOnB bool
+	noRespReasonA  string
+	noRespReasonB  string
 	// 协调者崩溃注入点（Phase-1 前 / Phase-2 广播前）
 	crashBeforeVote    bool
 	crashAfterDecision bool
@@ -111,7 +114,10 @@ func runCore(root string, spec coreSpec) (coreResult, error) {
 	}
 
 	system.ForceReject = spec.forceRejectOnB
+	entry.ForceNoResp = spec.forceNoRespOnA
 	system.ForceNoResp = spec.forceNoRespOnB
+	entry.NoRespReason = spec.noRespReasonA
+	system.NoRespReason = spec.noRespReasonB
 
 	res := coreResult{
 		scenario: spec.scenario,

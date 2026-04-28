@@ -133,6 +133,7 @@ type Worker struct {
 	Logger        *StableLogger
 	ForceReject   bool
 	ForceNoResp   bool
+	NoRespReason  string
 	InitStartedAt time.Time
 }
 
@@ -158,7 +159,11 @@ func (w *Worker) BeginPlan(planID string) error {
 // OnVoteReq 处理第一阶段投票请求（YES / NO / SILENT）。
 func (w *Worker) OnVoteReq(planID string) (bool, error) {
 	if w.ForceNoResp {
-		_ = w.Logger.Persist("VOTE_SILENT", map[string]interface{}{"planID": planID, "reason": "链路故障/干扰，未返回投票"})
+		reason := w.NoRespReason
+		if reason == "" {
+			reason = "链路故障/干扰，未返回投票"
+		}
+		_ = w.Logger.Persist("VOTE_SILENT", map[string]interface{}{"planID": planID, "reason": reason})
 		return false, ErrWorkerNoResponse
 	}
 
