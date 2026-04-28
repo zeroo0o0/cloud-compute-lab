@@ -20,14 +20,15 @@ ch5/
 │       └── two_phase_commit/
 │           └── main.go
 └── internal/
-    └── exp6twopc/
-        ├── twopc_engine.go
-        ├── cinematic_renderer.go
-        ├── scenario_normal_heist.go
-        ├── scenario_a_reject.go
-        ├── scenario_b_timeout.go
-        ├── scenario_c_coord_crash_phase1.go
-        ├── scenario_d_coord_crash_phase2.go
+    └── exp6_2pc/
+    ├── api.go
+    ├── core/
+    │   └── engine.go
+    ├── utils/
+    │   └── renderer.go
+    ├── scenario/
+    │   ├── core_shared.go
+    │   └── scenarios.go
         └── demo_test.go
 ```
 
@@ -52,40 +53,22 @@ go run ./cmd/exp6/two_phase_commit -scenario normal -step-ms 900
 - `cmd/exp6/two_phase_commit/main.go`
     - 启动入口，解析 `scenario/step-ms` 参数。
 
-- `internal/exp6twopc/twopc_engine.go`
-    - 2PC 通用基础设施：状态机、Coordinator/Worker、稳定存储、通用工具。
-    - 只放“可复用底层能力”，不承载具体剧情细节。
+- `internal/exp6_2pc/api.go`
+    - 对外兼容入口层：`RunScenario` / `SetVisualStepDelay` / 场景与状态常量。
 
-- `internal/exp6twopc/cinematic_renderer.go`
-    - 统一电影式渲染能力：逐字背景旁白、角色头像前缀、角色台词节奏控制。
-    - 场景文件仅提供“剧情脚本数据”，具体渲染由此文件统一完成。
+- `internal/exp6_2pc/core/engine.go`
+    - 2PC 协议核心层：状态机、Coordinator/Worker、稳定存储、恢复重放、报告汇总。
 
-- `internal/exp6twopc/scenario_normal_heist.go`
-    - 成功场景（normal）专用。
-    - `runScenarioNormalCore`：纯 2PC 逻辑（中文注释标识）。
-    - `renderScenarioNormalHeistDialogue`：剧情对话渲染（中文注释标识）。
+- `internal/exp6_2pc/utils/renderer.go`
+    - 通用渲染工具层：电影式输出、角色头像、打字机节奏控制。
 
-- `internal/exp6twopc/scenario_a_reject.go`
-    - 故障 A（拒票）专用。
-    - `runScenarioACore`：纯 2PC 逻辑。
-    - `renderScenarioADialogue`：剧情渲染。
+- `internal/exp6_2pc/scenario/core_shared.go`
+    - 场景核心复用层：统一 `runCore` 执行器、步骤快照、故障注入、动态分支辅助。
 
-- `internal/exp6twopc/scenario_b_timeout.go`
-    - 故障 B（超时无响应）专用。
-    - `runScenarioBCore`：纯 2PC 逻辑。
-    - `renderScenarioBDialogue`：剧情渲染。
+- `internal/exp6_2pc/scenario/scenarios.go`
+    - 场景编排层：`normal/a/b/c/d` 的场景配置与动态剧情渲染。
 
-- `internal/exp6twopc/scenario_c_coord_crash_phase1.go`
-    - 故障 C（Coordinator 第一阶段崩溃）专用。
-    - `runScenarioCCore`：纯 2PC 逻辑。
-    - `renderScenarioCDialogue`：剧情渲染。
-
-- `internal/exp6twopc/scenario_d_coord_crash_phase2.go`
-    - 故障 D（Coordinator 第二阶段崩溃 + 恢复重放）专用。
-    - `runScenarioDCore`：纯 2PC 逻辑。
-    - `renderScenarioDDialogue`：剧情渲染。
-
-- `internal/exp6twopc/demo_test.go`
+- `internal/exp6_2pc/demo_test.go`
     - 最小回归测试集合（不是无用文件）。
     - `TestScenarioNormalCommit`：验证正常场景最终必须 `COMMIT`。
     - `TestScenarioDRecoveryReplaysCommit`：验证二阶段崩溃后可恢复并重放到 `COMMIT`。
@@ -103,7 +86,7 @@ go run ./cmd/exp6/two_phase_commit -scenario normal -step-ms 900
 说明：在 `-scenario all` 下，`a/b/c/d` 也改为**逐场景按 Enter 推进**（normal -> Enter -> a -> Enter -> b -> Enter -> c -> Enter -> d）。
 说明：`-step-ms` 控制电影对白推进速度（默认 `650ms`）；设为 `0` 可一次性快速输出。
 说明：在 `-scenario normal` 下，已改造为“纸钞屋印钞厂”角色对白（教授 / 东京丹佛 / 里约 / 柏林内罗毕），但底层仍严格遵循 2PC：`VOTE-REQ -> VOTE-COMMIT -> GLOBAL-COMMIT`。
-说明：成功场景代码已拆分到 `scenario_normal_heist.go`，其中 `runScenarioNormalCore` 负责纯 2PC，`renderScenarioNormalHeistDialogue` 负责剧情对话渲染。
+说明：场景代码已收敛到 `internal/exp6_2pc/scenario/`：`core_shared.go` 负责纯 2PC 核心复用，`scenarios.go` 负责各场景配置与剧情渲染。
 
 ---
 
@@ -111,9 +94,9 @@ go run ./cmd/exp6/two_phase_commit -scenario normal -step-ms 900
 
 ### 🧭 背景世界观
 
-在一个虚构世界中，存在一种数字与纸钞混合的货币：`Aurora（极光币）`。
+在我们的游戏世界中，存在一种虚拟货币：`Aurora（极光币）`。
 
-皇家印钞厂不仅负责实体印刷，还掌握货币编号与流通合法性的认证系统。只有在印钞厂内完成并通过系统确认的一批印刷，才会被承认为“有效货币”。
+有一个金币副本，地图上有一个特殊的基地，皇家印钞厂。皇家印钞厂不仅负责实体印刷，还掌握货币编号与流通合法性的认证系统。只有在印钞厂内完成并通过系统确认的一批印刷，才会被承认为“有效货币”。
 
 ### 🎭 核心人物
 
@@ -127,7 +110,7 @@ go run ./cmd/exp6/two_phase_commit -scenario normal -step-ms 900
 
 ### 🎯 目标（抽象化描述）
 
-在不造成伤害、不破坏秩序的前提下，于极短时间内协同完成一次完整印刷流程，生成 **20 亿 Aurora（极光币）**。
+在不造成伤害、不破坏秩序的前提下，于极短时间内协同完成一次完整胁持皇家印钞厂并完成印刷流程，生成 **20 亿 Aurora（极光币）**。
 
 关键约束：
 
@@ -142,7 +125,7 @@ go run ./cmd/exp6/two_phase_commit -scenario normal -step-ms 900
 
 教授将行动拆成多个独立节点：
 
-- 柏林：流程控制（印刷节奏）
+- 柏林/内罗毕：流程控制（胁持印刷厂，控制印刷节奏）
 - 里约：系统控制（认证系统与监控切换）
 - 东京 / 丹佛：入口执行（进入与外部隔离）
 - 其他成员：各自负责关键点位
@@ -250,7 +233,7 @@ go run ./cmd/exp6/two_phase_commit -scenario normal -step-ms 900
 
 1. Coordinator 在收齐 `VOTE-COMMIT` 且写入 `DECISION=COMMIT` 后崩溃。
 2. Worker 进入 `READY` 并阻塞。
-3. 重启后的 Coordinator 执行 `loadPersistedState()`（代码中函数名为 `loadPersistedDecision`）恢复决议并重新广播 `GLOBAL-COMMIT`。
+3. 重启后的 Coordinator 执行 `loadPersistedDecision()` 恢复决议并重新广播 `GLOBAL-COMMIT`。
 
 ---
 

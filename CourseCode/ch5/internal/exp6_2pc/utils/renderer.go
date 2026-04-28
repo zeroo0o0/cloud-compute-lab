@@ -1,4 +1,4 @@
-package exp6_2pc
+package utils
 
 import (
 	"fmt"
@@ -6,9 +6,19 @@ import (
 	"time"
 )
 
-type cinematicLine struct {
+type CinematicLine struct {
 	Speaker string
 	Text    string
+}
+
+var visualStepDelay = 650 * time.Millisecond
+
+func SetVisualStepDelay(ms int) {
+	if ms <= 0 {
+		visualStepDelay = 0
+		return
+	}
+	visualStepDelay = time.Duration(ms) * time.Millisecond
 }
 
 func avatarOf(speaker string) string {
@@ -58,7 +68,7 @@ func typewrite(text string) {
 	fmt.Println()
 }
 
-func renderCinematicScene(title string, background []string, lines []cinematicLine) {
+func RenderCinematicScene(title string, background []string, lines []CinematicLine) {
 	fmt.Println("============================================================")
 	typewrite("🎬 " + title)
 	fmt.Println()
