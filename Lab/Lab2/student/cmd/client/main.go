@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -95,13 +96,9 @@ func drawUI() {
 	
 	// 对玩家列表进行排序，确保渲染顺序稳定（ID 从小到大）
 	players := append([]protocol.PlayerInfo{}, latestSnapshot.Players...)
-	for i := 0; i < len(players); i++ {
-		for j := i + 1; j < len(players); j++ {
-			if players[i].ID > players[j].ID {
-				players[i], players[j] = players[j], players[i]
-			}
-		}
-	}
+	sort.Slice(players, func(i, j int) bool {
+		return players[i].ID < players[j].ID
+	})
 
 	for _, p := range players {
 		tag := "  "
