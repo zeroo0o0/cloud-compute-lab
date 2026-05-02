@@ -1,7 +1,7 @@
 # 英雄集结演示实验 —— 代码与演示说明
 
-> 本目录 (`ch4/`) 是一个**独立的 Go module**，围绕 Go 并发与后端架构设计，提供 6 个可运行的演示实验。
-> 其中实验 1~5 为单机并发教学演示；实验 6 使用 Docker 中的 Redis 与 Docker 中的 PostgreSQL，演示分层存储架构。
+> 本目录 (`ch4/`) 是一个**独立的 Go module**，围绕 Go 并发控制、锁机制、对象池优化和分层存储架构，提供 6 组可运行演示程序。
+> 实验 1~5 为本地或本机网络演示；实验 6 同时提供“纯内存简化版”和“Redis + PostgreSQL 完整版”，便于先讲架构分层，再讲真实基础设施。
 
 ---
 
@@ -12,22 +12,35 @@ ch4/
 ├── go.mod                              # 独立模块 ch4
 ├── go.sum                              # 依赖校验文件
 ├── README.md                           # ← 本文件
-├── 英雄集结演示实验.md                  # 实验要求与讲解要点
+├── 英雄集结演示实验.md                  # 实验目标与讲解要点
+├── internal/
+│   ├── exp6simple/demo.go              # 实验6简化版：纯内存持久层/缓存层演示
+│   └── exp6demo/demo.go                # 实验6共享：Redis/PostgreSQL 初始化与数据操作
 └── cmd/
-    ├── README.md                       # cmd 子目录说明
-    ├── exp1/local_serial_loop_demo/    # ① 本地串行主循环
-    ├── exp1/network_serial_server_demo/# ① 网络版：服务器串行收包
-    ├── exp1/network_goroutine_server_demo/ # ① 网络版：服务器独立线程收包
-    ├── exp1/network_event_driven_sync_demo/ # ① 网络版：事件驱动 + 增量同步
+    ├── README.md                       # cmd 子目录索引
+    ├── exp1/README.md                       # ① 实验一讲解顺序与知识点代码位置
+    ├── exp1/01_basic_serial_blocking_demo/  # ①-1 最小原理：串行阻塞
+    ├── exp1/02_network_serial_warzone/      # ①-2 Warzone 嵌入：串行收包反例
+    ├── exp1/03_basic_goroutine_receiver_demo/ # ①-3 最小原理：goroutine 收包
+    ├── exp1/04_network_goroutine_warzone/   # ①-4 Warzone 嵌入：goroutine 收包
+    ├── exp1/05_basic_event_driven_demo/     # ①-5 最小原理：事件驱动
+    ├── exp1/06_network_event_driven_warzone/ # ①-6 Warzone 嵌入：事件驱动 + 增量同步
     ├── exp2/wrong/                     # ② 无锁竞态错误版
     ├── exp2/right/                     # ② Mutex 修复版
     ├── exp3/busy_wait/                 # ③ 忙等错误版
-    ├── exp3/cond_wait/                 # ③ Cond 修复版
+    ├── exp3/cond_wait/                 # ③ Cond 等待唤醒版
+    ├── exp3/spurious_wakeup_demo/      # ③ 虚假唤醒极简演示
     ├── exp4/channel_semaphore/         # ④ Channel 信号量
     ├── exp4/channel_timeout_lock/      # ④ Channel 超时锁
-    ├── exp4/rw_mutex/                  # ④ RWMutex 读写分离
-    ├── exp5/sync_pool_demo/            # ⑤ sync.Pool 性能优化
-    └── exp6/storage_arch/              # ⑥ Redis + PostgreSQL 分层存储
+    ├── exp4/lock_cost_demo/            # ④ 锁代价极简演示
+    ├── exp4/rw_mutex/                  # ④ Mutex 与 RWMutex 对照
+    ├── exp5/sync_pool_demo/            # ⑤ sync.Pool 对象池优化
+    ├── exp5/connection_pool_demo/      # ⑤ 本机 TCP 连接池演示
+    ├── exp5/perf_observe_demo/         # ⑤ 性能观测工具教程
+    ├── exp6/write_through_simple_demo/ # ⑥ Write Through 简化版
+    ├── exp6/cache_aside_simple_demo/   # ⑥ Cache Aside 简化版
+    ├── exp6/write_through_demo/        # ⑥ Write Through 演示
+    └── exp6/cache_aside_demo/          # ⑥ Cache Aside 演示
 ```
 
 ---
@@ -38,8 +51,10 @@ ch4/
 
 | 依赖 | 版本 | 说明 |
 |------|------|------|
-| Go | ≥ 1.21 | 所有实验使用 Go 1.21+ |
-| Docker Desktop | 已安装并启动 | 仅实验 6 需要，用于启动 Redis 与 PostgreSQL 容器 |
+| Go | >= 1.21 | 所有实验使用 Go 1.21+ |
+| Docker Desktop | 已安装并启动 | 仅实验 6 完整版需要 |
+| Redis | 7 | 建议使用 Docker 容器 `ch4-redis`，仅实验 6 完整版需要 |
+| PostgreSQL | 16 | 建议使用 Docker 容器 `ch4-postgres`，仅实验 6 完整版需要 |
 
 ### 首次构建
 
@@ -47,29 +62,32 @@ ch4/
 # 进入 ch4 目录
 cd ch4
 
-# 验证实验 1~6
-go build ./cmd/exp1/...
-go build ./cmd/exp2/...
-go build ./cmd/exp3/...
-go build ./cmd/exp4/...
-go build ./cmd/exp5/...
-go build ./cmd/exp6/...
+# 首次拉取代码后，先整理并拉取依赖
+go mod tidy
+
+# 编译全部实验，验证无错误
+go build ./...
 ```
 
+---
 
+## 实验六环境准备
 
-### 实验六运行前准备
+实验 6 现在有两组入口：
 
-实验 6 不是纯本地模拟，它依赖两个真实环境，并且这两个环境现在都通过 Docker Desktop 提供：
+- 简化版：纯内存模拟持久层和缓存层，不需要 Docker、Redis、PostgreSQL。
+- 完整版：连接真实 Redis 和 PostgreSQL，用来观察真实中间件下的读写路径与一致性。
 
-- Redis：Docker 容器 `ch4-redis`
-- PostgreSQL：Docker 容器 `ch4-postgres`
+如果你这节课只想先讲“为什么要分层、冷热数据怎么放、访问路径为什么不同”，直接运行简化版即可：
 
-#### 1. 启动 Docker Desktop
+```powershell
+go run ./cmd/exp6/write_through_simple_demo
+go run ./cmd/exp6/cache_aside_simple_demo
+```
 
-先确认 Docker Desktop 已经启动；如果 Docker 没启动，下面的 `docker run` 和 `docker start` 都会失败。
+下面这部分环境准备只针对实验 6 的完整版。
 
-检查命令：
+### 1. 启动 Docker Desktop
 
 ```powershell
 docker ps
@@ -77,7 +95,7 @@ docker ps
 
 如果能正常返回容器列表，说明 Docker 已经可用。
 
-#### 2. 启动 Redis 容器
+### 2. 启动 Redis 容器
 
 第一次创建并启动：
 
@@ -91,7 +109,7 @@ docker run -d --name ch4-redis -p 6379:6379 redis:7
 docker start ch4-redis
 ```
 
-检查 Redis 是否正常：
+检查 Redis：
 
 ```powershell
 docker exec -it ch4-redis redis-cli ping
@@ -103,7 +121,7 @@ docker exec -it ch4-redis redis-cli ping
 PONG
 ```
 
-#### 3. 启动 PostgreSQL 容器
+### 3. 启动 PostgreSQL 容器
 
 第一次创建并启动：
 
@@ -117,48 +135,50 @@ docker run -d --name ch4-postgres -e POSTGRES_USER=你的用户名 -e POSTGRES_P
 docker start ch4-postgres
 ```
 
-这套配置对应的 PostgreSQL 连接串是：
+对应连接串格式：
 
 ```text
 postgres://你的用户名:你的密码@127.0.0.1:5432/postgres?sslmode=disable
 ```
 
-#### 4. 设置实验六环境变量
+### 4. 设置环境变量
 
-在 PowerShell 中设置：
+Windows PowerShell：
 
 ```powershell
 $env:REDIS_ADDR="127.0.0.1:6379"
 $env:PG_DSN="postgres://你的用户名:你的密码@127.0.0.1:5432/postgres?sslmode=disable"
 ```
 
-其中：
+macOS / Linux：
 
-- `REDIS_ADDR` 指向 Docker 中映射到本机 `6379` 的 Redis
-- `PG_DSN` 指向 Docker 中映射到本机 `5432` 的 PostgreSQL
-- 代码不会内置任何个人 PostgreSQL 账号密码，使用前请由每位使用者自行设置 `PG_DSN`
-
-#### 5. 运行实验六
-
-```powershell
-go run ./cmd/exp6/storage_arch
+```bash
+export REDIS_ADDR="127.0.0.1:6379"
+export PG_DSN="postgres://你的用户名:你的密码@127.0.0.1:5432/postgres?sslmode=disable"
 ```
 
-程序启动后会自动完成这些动作：
+说明：
 
-- 连接 Redis
-- 连接 PostgreSQL
-- 自动创建 `players` 与 `game_configs` 两张表
-- 自动写入演示初始数据
-- 依次演示 `Write Through` 和 `Cache Aside`
+- `REDIS_ADDR` 指向 Docker 映射到本机的 Redis 地址；默认值是 `127.0.0.1:6379`。
+- `PG_DSN` 指向 Docker 映射到本机的 PostgreSQL 地址；代码不会内置个人账号密码，必须由使用者自行设置。
 
-#### 6. 常见失败原因
+### 5. 手动查库命令
 
-- `docker` 命令报错：通常是 Docker Desktop 没有启动。
-- Redis 连接失败：通常是 `ch4-redis` 容器没启动，或 `6379` 端口未映射成功。
-- PostgreSQL 连接失败：通常是 `ch4-postgres` 容器没启动，或 `PG_DSN` 与容器账号密码不一致。
+实验 6 运行前后，可以用以下命令确认 Redis / PostgreSQL 中的数据变化。
 
-> 实验 6 依赖真实 Redis 与真实 PostgreSQL；实验 1~5 不需要额外环境。
+```powershell
+# Redis：查看金币缓存
+docker exec -it ch4-redis redis-cli GET gold:player_1
+
+# Redis：查看配置缓存
+docker exec -it ch4-redis redis-cli GET cfg:drop_rate
+
+# PostgreSQL：查看玩家金币
+docker exec -it ch4-postgres psql -U 你的用户名 -d postgres -c "SELECT user_id, gold FROM players;"
+
+# PostgreSQL：查看游戏配置
+docker exec -it ch4-postgres psql -U 你的用户名 -d postgres -c "SELECT config_key, config_value FROM game_configs;"
+```
 
 ---
 
@@ -166,147 +186,337 @@ go run ./cmd/exp6/storage_arch
 
 ### Step 1 — 突破单线程瓶颈
 
-**知识点**：串行阻塞、Goroutine 解耦、事件驱动、增量同步。
+**对应页码**：第 4-6, 11-12, 15 页
+
+**知识点**：串行阻塞、goroutine 并发解耦、事件驱动、增量同步。
+
+**实验功能**：先用最小代码讲清楚“串行等待、goroutine 解耦、事件驱动”的因果关系，再把同一个写法嵌入 Warzone 的极简游戏场景。游戏嵌入版压缩为“玩家 ACTION -> 权威 PlayerState -> STATE_UPDATE”，只保留 `fast`（疾风游侠）和 `slow`（断流骑士）两名玩家，便于观察慢连接如何影响或不影响快玩家。
+
+**详细讲解**：见 `cmd/exp1/README.md`，其中标明了每个知识点对应哪一块代码。
+
+#### 演示 1：串行阻塞
 
 ```powershell
-go run ./cmd/exp1/local_serial_loop_demo
-go run ./cmd/exp1/network_serial_server_demo server
-go run ./cmd/exp1/network_serial_server_demo client
-go run ./cmd/exp1/network_goroutine_server_demo server
-go run ./cmd/exp1/network_goroutine_server_demo client
-go run ./cmd/exp1/network_event_driven_sync_demo server
-go run ./cmd/exp1/network_event_driven_sync_demo client
+# 第一步：最小原理演示
+go run ./cmd/exp1/01_basic_serial_blocking_demo
+
+# 终端1：服务端
+go run ./cmd/exp1/02_network_serial_warzone/server
+
+# 终端2：快玩家
+go run ./cmd/exp1/02_network_serial_warzone/client -player fast
+
+# 终端3：慢玩家
+go run ./cmd/exp1/02_network_serial_warzone/client -player slow
 ```
 
 **观察点**：
 
-- `local_serial_loop_demo` 展示最原始的本地串行主循环，慢玩家会直接拖慢整帧。
-- `network_serial_server_demo` 用 2 个终端模拟真实客户端/服务器，但服务器仍按连接顺序串行收包。
-- `network_goroutine_server_demo` 保持真实网络分离，同时把每条连接的收包交给独立 goroutine，输出风格与串行网络版保持一致，方便直接对比。
-- `network_event_driven_sync_demo` 进一步展示真实网络下的事件驱动与增量同步：服务器按 tick 前进，只处理已经到达的输入，不等最慢玩家。
+- 最小演示中，fast 本身只需要 20ms，但主循环先调用 slow 的读取逻辑，所以 fast 也被拖慢。
+- 游戏嵌入版中，服务端 `runFrameSerial` 先读 `slow` 的 ACTION 再读 `fast` 的 ACTION，复现“慢玩家拖住后面的玩家输入”。
 
-**课堂结论**：
+#### 演示 2：goroutine 并发收包
 
-- 先看 `local_serial_loop_demo`，能理解“慢输入会拖帧”这个最基本现象。
-- 再看 `network_serial_server_demo`，能看清问题不只是“玩家慢”，而是服务器在串行等待某条慢连接。
-- 切到 `network_goroutine_server_demo` 后，慢连接仍然存在，但不会再让服务器主循环卡死在某一条连接上。
-- 最后看 `network_event_driven_sync_demo`，能补齐“只消费已到达事件、只同步变化状态”的思路。
+```powershell
+# 第一步：最小原理演示
+go run ./cmd/exp1/03_basic_goroutine_receiver_demo
+
+# 终端1：服务端
+go run ./cmd/exp1/04_network_goroutine_warzone/server
+
+# 终端2：快玩家
+go run ./cmd/exp1/04_network_goroutine_warzone/client -player fast
+
+# 终端3：慢玩家
+go run ./cmd/exp1/04_network_goroutine_warzone/client -player slow
+```
+
+**观察点**：主循环很快完成收包任务分发；slow 仍会晚到，但被隔离在自己的连接 goroutine 中，不再阻止 fast 的 ACTION 先被应用到权威世界状态。
+
+#### 演示 3：事件驱动 + 增量同步
+
+```powershell
+# 第一步：最小原理演示
+go run ./cmd/exp1/05_basic_event_driven_demo
+
+# 终端1：服务端
+go run ./cmd/exp1/06_network_event_driven_warzone/server
+
+# 终端2：快玩家
+go run ./cmd/exp1/06_network_event_driven_warzone/client -player fast
+
+# 终端3：慢玩家
+go run ./cmd/exp1/06_network_event_driven_warzone/client -player slow
+```
+
+**观察点**：服务器按 tick 前进，只处理已经到达的 ACTION；没有 ACTION 时不等待；增量 `STATE_UPDATE` 只同步发生变化的玩家。
 
 ---
 
 ### Step 2 — 临界区与数据竞争
 
+**对应页码**：第 17-21 页
+
 **知识点**：Race Condition、临界区、`sync.Mutex`。
 
+**实验功能**：模拟 5 名玩家同时抢同一个 NPC 的唯一掉落，复现“检查是否可拿”和“标记已拿走”没有放进同一个临界区时产生的重复掉落，再用 Mutex 修复。
+
 ```powershell
+# 无锁错误版
 go run ./cmd/exp2/wrong
+
+# Mutex 修复版
 go run ./cmd/exp2/right
+```
+
+**操作**：默认每轮会等待回车；如果想自动连续演示，可加 `-auto`。
+
+```powershell
+go run ./cmd/exp2/wrong -rounds 3 -auto
+go run ./cmd/exp2/right -rounds 3 -auto
 ```
 
 **观察点**：
 
-- 无锁版会出现“唯一物品被多次领取”，而且重复领取人数不必每轮都一样。
-- 加锁版只允许一个玩家成功获得宝物。
-- 对照输出可以看到临界区保护前后的差异。
+- 无锁版可能出现多个赢家，并高亮“核心资源：唯一宝物归属”。
+- Mutex 版只允许一个玩家成功领取，其余玩家失败。
 
-**课堂结论**：
-
-- 业务规则写得再正确，只要“检查是否可拿”和“标记已拿走”不在同一个临界区里，就仍然会出现竞态窗口。
-- `sync.Mutex` 修复的不是“谁先抢到”的业务逻辑，而是把检查与修改变成原子的一段。
+**成功标准**：错误版能复现唯一物品被复制；修复版成功领取人数始终为 1。
 
 ---
 
 ### Step 3 — 告别忙等
 
+**对应页码**：第 23-26, 42 页
+
 **知识点**：忙等、`sync.Cond`、等待队列、虚假唤醒。
+
+**实验功能**：在 NPC 宝物为空时，对比“玩家不断 Lock -> Check -> Unlock 空转”和“玩家进入 Cond 等待队列，补货后被唤醒”的差别。
+
+#### 演示 1：忙等错误版
 
 ```powershell
 go run ./cmd/exp3/busy_wait
+```
+
+**操作命令**：
+
+```text
+status
+restock 3
+quit
+```
+
+**观察点**：补货前执行 `status`，可以看到玩家已经累计大量白跑次数。
+
+#### 演示 2：Cond 等待唤醒版
+
+```powershell
 go run ./cmd/exp3/cond_wait
 ```
 
-**观察点**：
+**操作命令**：
 
-- 忙等版会出现极高的空转次数。
-- `sync.Cond` 版会展示等待、唤醒和重新检查条件。
-- `for` 循环重检逻辑可用于讲解“为什么不能只用 `if`”。
+```text
+status
+restock 3
+quit
+```
 
-**课堂结论**：
+**观察点**：库存为空时玩家进入等待队列；补货后被 `Signal()` 唤醒，并在 `for npc.Items == 0` 中重新检查条件。
 
-- 忙等的问题不是功能错误，而是没有库存时线程仍在不停抢锁和检查，白白消耗 CPU。
-- `Cond.Wait()` 会先释放锁再休眠，被唤醒后重新抢锁，所以必须用 `for` 重检条件来防住虚假唤醒。
+#### 演示 3：虚假唤醒极简版
+
+```powershell
+go run ./cmd/exp3/spurious_wakeup_demo
+```
+
+**观察点**：错误版用 `if`，被一次“没有补货的通知”唤醒后就继续取空队列；正确版用 `for`，每次 `Wait()` 返回后都重新检查队列是否真的有宝物。
 
 ---
 
 ### Step 4 — 锁的进阶技巧与粒度优化
 
+**对应页码**：第 45-46, 49-51 页
 
 **知识点**：Channel 信号量、超时锁、`sync.RWMutex`。
 
+**实验功能**：演示 Go 中不止有普通 Mutex，还可以用 Channel 表达许可数和超时竞争，并用 RWMutex 优化读多写少场景；同时用一个极简性能对照感受“锁加多了程序会变慢”。
+
+#### 演示 1：锁的代价极简版
+
+```powershell
+go run ./cmd/exp4/lock_cost_demo
+```
+
+**观察点**：同样计算最终金币，`每次击杀都 Lock/Unlock` 会比 `本地累计后再合并一次` 慢很多；如果课堂机器太快，可以加大 `-ops`。
+
+```powershell
+go run ./cmd/exp4/lock_cost_demo -workers 8 -ops 2000000
+```
+
+#### 演示 2：Channel 信号量
+
 ```powershell
 go run ./cmd/exp4/channel_semaphore
+```
+
+**操作命令**：
+
+```text
+wave 6
+status
+wait
+quit
+```
+
+**观察点**：Channel 容量为 3，同一时刻真正进入执行区的 Worker 数量不会超过 3。
+
+#### 演示 3：Channel 超时锁
+
+```powershell
 go run ./cmd/exp4/channel_timeout_lock
+```
+
+**观察点**：玩家 A 占用资源 5 秒，玩家 B 只等待 2 秒；超时后进入降级逻辑，避免永久阻塞。
+
+#### 演示 4：Mutex 与 RWMutex 对照
+
+```powershell
 go run ./cmd/exp4/rw_mutex
 ```
 
+**操作**：按回车运行普通 Mutex 对照，再按回车运行 RWMutex 对照。
+
 **观察点**：
 
-- `channel_semaphore` 展示如何用 Channel 控制最大并发数。
-- `channel_timeout_lock` 展示等待超时后如何快速降级，不把协程永远卡死。
-- `rw_mutex` 除了展示读多写少场景下的并发读取优势，也显式展示“写者排队后”和“写入进行中”到来的读者都会被阻塞。
-- 这一组实验用于对比“锁不仅只有 Mutex 一种用法”。
-
-**课堂结论**：
-
-- Channel 不只适合传消息，也很适合表达“许可数”和“带超时的竞争”。
-- `RWMutex` 的重点不只是“多个读者可以并发”，还包括一旦写者开始排队，后续读者也要等待，避免写者长期饥饿。
+- 普通 Mutex 下首批读者也会串行。
+- RWMutex 下首批读者可以并发读取。
+- 写者排队后，后续读者仍会等待，避免写者长期饥饿。
 
 ---
 
 ### Step 5 — 高并发性能榨取
 
-**知识点**：`sync.Pool`、对象复用、GC 压力、尾延迟。
+**对应页码**：第 54, 56, 58 页
+
+**知识点**：`sync.Pool`、对象复用、连接池、长连接复用、`pprof`、Benchmark、GC 压力、尾延迟。
+
+**实验功能**：先对比高频请求中“每次 new 一个 10KB 临时缓冲”和“通过 sync.Pool 复用缓冲”的分配次数、GC 次数和尾延迟；再用本机 TCP server 演示“每个请求都新建短连接”和“从连接池借还长连接”的耗时差异；最后用 pprof 和 benchmark 演示如何定位 CPU 热点、内存分配、锁竞争和 goroutine 泄漏。
+
+#### 演示 1：对象池 sync.Pool
 
 ```powershell
-go run ./cmd/exp5/sync_pool_demo
+# 优化前：每次 new
+go run ./cmd/exp5/sync_pool_demo before -requests 12000 -payload-kb 10 -work 500 -concurrency 32
+
+# 优化后：sync.Pool 复用
+go run ./cmd/exp5/sync_pool_demo after -requests 12000 -payload-kb 10 -work 500 -concurrency 32
 ```
 
 **观察点**：
 
-- 对比 `new(bytes.Buffer)` 与 `sync.Pool` 的总耗时。
-- 观察分配次数、GC 次数或尾延迟差异。
-- 理解“池化不是为了炫技，而是为了减少重复分配”。
+- `Mallocs` 是否明显下降。
+- `GC` 次数是否明显下降。
+- `P99` / `P99.9` 是否降低。
 
-**课堂结论**：
+**说明**：这里演示的是对象池，不是数据库连接池；两者都叫“池”，但资源类型和生命周期约束不同。
 
-- `sync.Pool` 不保证每次都命中，但在高频临时对象场景里，通常能明显减少分配与 GC 压力。
-- 这里演示的是对象池，不是数据库连接池；两者都叫“池”，但适用资源类型和约束不同。
+#### 演示 2：网络连接池
+
+```powershell
+go run ./cmd/exp5/connection_pool_demo
+```
+
+**观察点**：短连接版本每个请求都 `Dial + Close`；连接池版本只创建少量长连接，后续请求从池子里借连接、用完再还。输出会直接对比建连次数和总耗时。
+
+如果课堂机器太快，可以放大模拟建连成本：
+
+```powershell
+go run ./cmd/exp5/connection_pool_demo -requests 240 -concurrency 24 -max-open 16 -max-idle 8 -lifetime-ms 200 -handshake-ms 50
+```
+
+**贴近 PPT 的看法**：这个 demo 现在明确对应连接池初始化三项配置：
+
+- `maxOpenConns`：最多同时打开多少条连接
+- `maxIdleConns`：最多保留多少条空闲连接
+- `connMaxLifetime`：连接活多久后需要重建
+
+#### 演示 3：性能观测工具教程
+
+详细安装和命令见：
+
+```powershell
+CourseCode/ch4/cmd/exp5/perf_observe_demo/README.md
+```
+
+最小命令示例：
+
+```powershell
+# Benchmark + 分配观测
+go test ./cmd/exp5/perf_observe_demo -run '^$' -bench . -benchmem
+
+# CPU profile
+go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkCPUHotspotBad -benchtime 2s -cpuprofile cpu_bad.prof
+go tool pprof -top cpu_bad.prof
+
+# 网页端建议写法
+go tool pprof -http=:8081 cpu_bad.prof
+
+# goroutine profile HTTP 观测
+go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 20
+```
+
+**观察点**：用 `BenchmarkCPUHotspotBad/Good` 对比 CPU 热点优化；用 `BenchmarkHeapAllocBad/Good` 对比 `allocs/op`；用 `BenchmarkMutexContentionBad/Good` 和 `-mutexprofile` 观察锁竞争；用 `-mode leak/fixed` 观察 goroutine 数量是否持续上涨。做 goroutine live 观测时，要先看到第一个终端打印 `[pprof] HTTP 服务已启动`，再去第二个终端执行 `go tool pprof`。
 
 ---
 
 ### Step 6 — 游戏数据分层存储架构
 
-**知识点**：Redis、PostgreSQL、Write Through、Cache Aside。
+**对应页码**：第 61-63 页
 
-**运行前环境要求**：
+**知识点**：分层存储、冷热数据、Write Through、Cache Aside。
 
-- Docker Desktop 已启动
-- Redis 容器 `ch4-redis` 已运行并映射 `6379:6379`
-- PostgreSQL 容器 `ch4-postgres` 已运行并映射 `5432:5432`
-- PowerShell 中已设置 `PG_DSN`， $env:PG_DSN="postgres://账号:密码@127.0.0.1:5432/postgres?sslmode=disable"
+**实验功能**：先用纯内存简化版讲清楚“持久层 + 缓存层”的职责分工，再用真实 Redis 与 PostgreSQL 演示完整分层存储。核心资产用 Write Through 保证双写顺序；配置类数据用 Cache Aside 展示缓存未命中、回填、失效与再次命中。
 
-**运行命令**：
+#### 演示 0：简化版（推荐先讲）
 
 ```powershell
-go run ./cmd/exp6/storage_arch
+go run ./cmd/exp6/write_through_simple_demo
+go run ./cmd/exp6/cache_aside_simple_demo
 ```
 
-**观察点**：
+**观察点**：不依赖任何容器，只用内存 map 模拟“持久层 / 缓存层”两层结构，先让学生看懂冷热数据放在哪里、读写路径为什么不同。
 
-- `Write Through`：先写 PostgreSQL，再同步 Redis。
-- `Cache Aside`：先查 Redis，未命中时再查 PostgreSQL 并回填。
-- 终端会输出中文日志，便于课堂中逐步讲解数据流。
-- 程序会自动初始化表结构与演示数据，适合直接投屏讲解。
+#### 演示 1：Write Through（完整版）
+
+```powershell
+go run ./cmd/exp6/write_through_demo
+```
+
+**观察点**：扣除 `player_1` 金币时，先更新 PostgreSQL，再同步 Redis；最后输出 PostgreSQL 与 Redis 的金币一致性检查。
+
+**手动验证**：
+
+```powershell
+docker exec -it ch4-postgres psql -U 你的用户名 -d postgres -c "SELECT user_id, gold FROM players;"
+docker exec -it ch4-redis redis-cli GET gold:player_1
+```
+
+#### 演示 2：Cache Aside（完整版）
+
+```powershell
+go run ./cmd/exp6/cache_aside_demo
+```
+
+**观察点**：第一次读配置时缓存未命中并回填；第二次读命中 Redis；更新配置时删除缓存；再次读取时重新从 PostgreSQL 回填。
+
+**手动验证**：
+
+```powershell
+docker exec -it ch4-postgres psql -U 你的用户名 -d postgres -c "SELECT config_key, config_value FROM game_configs;"
+docker exec -it ch4-redis redis-cli GET cfg:drop_rate
+```
 
 ---
 
@@ -314,12 +524,12 @@ go run ./cmd/exp6/storage_arch
 
 | 步骤 | 额外依赖 | 说明 |
 |------|----------|------|
-| 1 | 无 | 单机并发演示 |
+| 1 | 无 | 本机网络并发演示 |
 | 2 | 无 | 单机并发演示 |
 | 3 | 无 | 单机并发演示 |
 | 4 | 无 | 单机并发演示 |
 | 5 | 无 | 单机性能演示 |
-| 6 | Redis + PostgreSQL | Redis 与 PostgreSQL 都建议使用 Docker 容器启动 |
+| 6 | 简化版无；完整版需要 Redis + PostgreSQL | 建议通过 Docker 容器启动完整版 |
 
 ---
 
@@ -327,9 +537,9 @@ go run ./cmd/exp6/storage_arch
 
 | 步骤 | 演示目标 | 关键结构/机制 |
 |------|----------|----------------|
-| 1 | 单线程阻塞 vs 并发解耦 | `goroutine`、事件驱动 |
-| 2 | 竞态条件复现与修复 | `sync.Mutex` |
-| 3 | 忙等替换为阻塞等待 | `sync.Cond` |
-| 4 | 锁的高级技巧 | Channel、超时锁、`sync.RWMutex` |
-| 5 | 高并发性能优化 | `sync.Pool`、GC、尾延迟 |
-| 6 | 分层存储架构 | Redis、PostgreSQL、Write Through、Cache Aside |
+| 1 | 单线程阻塞 vs 并发解耦 | goroutine、事件驱动、tick、增量同步 |
+| 2 | 数据竞争复现与修复 | `sync.Mutex` |
+| 3 | 忙等替换为阻塞等待 | `sync.Cond`、`Wait`、`Signal` |
+| 4 | 锁的进阶技巧 | Channel 信号量、超时锁、`sync.RWMutex` |
+| 5 | 临时对象复用 | `sync.Pool`、GC、尾延迟 |
+| 6 | 分层存储与缓存一致性 | Redis、PostgreSQL、Write Through、Cache Aside |

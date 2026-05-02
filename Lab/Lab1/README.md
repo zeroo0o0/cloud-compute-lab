@@ -1,6 +1,10 @@
 # Lab 1 · 网络编程：双人对战游戏（C/S 架构）
 
-## 1. 实验目的
+> **总分：20 分**
+
+---
+
+## 一、实验目的
 
 | 目标 | 说明 |
 |------|------|
@@ -11,7 +15,7 @@
 
 ---
 
-## 2. 游戏规则
+## 二、游戏规则
 
 ```
 地图：20 × 20，坐标 (X, Y)，X 向右，Y 向下
@@ -34,7 +38,7 @@
 
 ---
 
-## 3. 文件结构
+## 三、文件结构
 
 ```
 Lab1/
@@ -42,9 +46,9 @@ Lab1/
 │   ├── go.mod
 │   ├── protocol/message.go   ★ 需填写 Send() / Receive()
 │   ├── game/game.go          ★ 需填写 handleMove() / handleAttack()
-│   └── cmd/                  
-│       ├── server/main.go    已提供，无需修改
-│       └── client/main.go    已提供，无需修改
+│   └── cmd/
+│       ├── server/main.go    ★ 需填写 TCP 监听与接受连接
+│       └── client/main.go    ★ 需填写 TCP 连接服务器
 │
 └── test/
     ├── autotest.go    自动测试程序
@@ -55,11 +59,66 @@ Lab1/
 
 ---
 
-## 4. 实验任务
+## 四、实验任务与评分
+
+### 任务 C：建立 TCP 连接（`student/cmd/`）
+
+> TCP 是本实验所有通信的基础。服务端需要监听端口等待连接，客户端需要主动连接服务端，两者建立连接后才能开始收发消息。
+
+#### C-1  服务端启动监听（`cmd/server/main.go`）　　**（2 分）**
+
+**功能**：在指定地址上开启 TCP 监听，等待客户端连接。
+
+**提示**：
+- 调用 `net.Listen("tcp", addr)` 开启监听
+- 若出错，打印错误后 `os.Exit(1)`
+- 使用 `defer ln.Close()` 确保退出时关闭监听器
+
+```go
+// TODO C-1
+ln, err := net.Listen(???, ???)
+if err != nil { ... }
+defer ln.Close()
+```
+
+#### C-2  服务端接受连接（`cmd/server/main.go`）　　**（2 分）**
+
+**功能**：在循环中持续接受新的客户端 TCP 连接。
+
+**提示**：
+- 调用 `ln.Accept()` 阻塞等待一个新连接，返回 `net.Conn`
+- 若出错，打印错误后 `continue` 跳过，继续等待下一个
+
+```go
+// TODO C-2
+raw, err := ln.Accept()
+if err != nil { ...; continue }
+```
+
+#### C-3  客户端连接服务器（`cmd/client/main.go`）　　**（2 分）**
+
+**功能**：客户端主动向服务器发起 TCP 连接。
+
+**提示**：
+- 调用 `net.Dial("tcp", serverAddr)` 发起连接
+- 若出错，打印错误后 `os.Exit(1)`
+- 使用 `defer raw.Close()` 确保退出时关闭连接
+
+```go
+// TODO C-3
+raw, err := net.Dial(???, ???)
+if err != nil { ... }
+defer raw.Close()
+```
+
+> **C/S 架构核心理解**：
+> `net.Listen` 是服务端被动等待的入口，`net.Dial` 是客户端主动发起的入口，`ln.Accept()` 返回的 `net.Conn` 和 `net.Dial` 返回的 `net.Conn` 本质相同，都是一条全双工 TCP 连接，后续统一通过 `protocol.NewConn` 封装使用。
+
+---
 
 ### 任务 A：实现网络消息收发（`student/protocol/message.go`）
 
-#### A-1  `Send(msg Message) error`
+#### A-1  `Send(msg Message) error`　　**（2 分）**
 
 **功能**：将 `msg` 序列化为 JSON，通过 TCP 连接发送给对端。
 
@@ -75,7 +134,7 @@ func (c *Conn) Send(msg Message) error {
 }
 ```
 
-#### A-2  `Receive() (Message, error)`
+#### A-2  `Receive() (Message, error)`　　**（2 分）**
 
 **功能**：从 TCP 连接阻塞读取一条 JSON 消息并返回。
 
@@ -97,7 +156,7 @@ func (c *Conn) Receive() (Message, error) {
 
 ### 任务 B：实现游戏逻辑（`student/game/game.go`）
 
-#### B-1  `handleMove(p *Player, dir string) string`
+#### B-1  `handleMove(p *Player, dir string) string`　　**（5 分）**
 
 **功能**：将玩家 `p` 向 `dir` 方向移动一步，越界时保持不动。
 
@@ -108,7 +167,7 @@ func (c *Conn) Receive() (Message, error) {
 
 **边界约束**：`X ∈ [0, MapWidth-1]`，`Y ∈ [0, MapHeight-1]`
 
-#### B-2  `handleAttack(actor, target *Player) string`
+#### B-2  `handleAttack(actor, target *Player) string`　　**（5 分）**
 
 **功能**：actor 攻击 target，检查范围后扣血，HP 归零则标记死亡。
 
@@ -120,13 +179,30 @@ func (c *Conn) Receive() (Message, error) {
 
 ---
 
-## 5. 运行方法
+## 五、评分汇总
+
+| 任务 | 位置 | 说明 | 分值 |
+|------|------|------|------|
+| C-1 | `cmd/server/main.go` | `net.Listen` 启动监听 | 2 分 |
+| C-2 | `cmd/server/main.go` | `ln.Accept()` 接受连接 | 2 分 |
+| C-3 | `cmd/client/main.go` | `net.Dial` 连接服务器 | 2 分 |
+| A-1 | `protocol/message.go` | `Send` 发送消息 | 2 分 |
+| A-2 | `protocol/message.go` | `Receive` 接收消息 | 2 分 |
+| B-1 | `game/game.go` | `handleMove` 移动逻辑 | 5 分 |
+| B-2 | `game/game.go` | `handleAttack` 攻击逻辑 | 5 分 |
+| **合计** | | | **20 分** |
+
+> 评分以自动化测试通过情况为准，每个测试用例对应若干得分点，部分正确可获得部分分数。
+
+---
+
+## 六、运行方法
 
 > 平台兼容说明：
 > Lab1 的服务端和客户端代码可在 Windows、macOS、Linux 下运行。
 > 只要本机安装了 Go，即可直接使用 `go run` 启动。
 
-### 5.1 手动运行（两个终端）
+### 6.1 手动运行
 
 ```bash
 # 终端 1：启动服务器
@@ -141,18 +217,17 @@ cd student
 go run ./cmd/client
 ```
 
-
 ---
 
-## 6. 测试方法
+## 七、测试方法
 
-### 6.1 一键测试（推荐）
+### 7.1 一键测试（推荐）
 
 macOS / Linux：
 
 ```bash
 cd test
-./run_test.sh
+bash run_test.sh
 ```
 
 Windows：
@@ -175,7 +250,7 @@ go run ./runner/main.go
 3. 模拟两个客户端进行协议交互
 4. 验证功能是否符合预期，输出 ✅ PASS / ❌ FAIL
 
-### 6.2 运行单项测试
+### 7.2 运行单项测试
 
 ```bash
 # 先在另一个终端启动服务器
@@ -189,16 +264,11 @@ go run autotest.go 2   # 测试移动边界
 go run autotest.go 4   # 测试攻击范围
 ```
 
-> 说明：
-> 单项测试本身是跨平台的，真正需要区分平台的是一键测试脚本：
-> - macOS / Linux 使用 `run_test.sh`
-> - Windows 使用 `run_test.bat`
-
-### 6.3 测试用例说明
+### 7.3 测试用例说明
 
 | 编号 | 测试内容 | 对应任务 |
 |------|----------|----------|
-| Test 1 | 连接握手、ID 分配 | 任务 A（Send/Receive） |
+| Test 1 | 连接握手、ID 分配 | 任务 C + 任务 A |
 | Test 2 | 向上移动边界保护（Y 不低于 0） | 任务 B-1 |
 | Test 3 | 方向映射正确性（向右 X+1，下边界保护） | 任务 B-1 |
 | Test 4 | 超范围攻击失败（HP 不变） | 任务 B-2 |
@@ -208,10 +278,16 @@ go run autotest.go 4   # 测试攻击范围
 
 ---
 
-## 7. 常见问题
+## 八、常见问题
+
+**Q：`panic: C-1 尚未实现`**
+A：在 `cmd/server/main.go` 中找到对应 TODO，删除 `panic` 行，填入 `net.Listen` 调用。
+
+**Q：`panic: C-3 尚未实现`**
+A：在 `cmd/client/main.go` 中找到对应 TODO，删除 `panic` 行，填入 `net.Dial` 调用。
 
 **Q：`panic: Send 尚未实现`**
-A：删除 `panic(...)` 行，填入正确代码。
+A：在 `protocol/message.go` 中找到对应 TODO，删除 `panic` 行，填入正确代码。
 
 **Q：两个客户端连上后卡住不动**
 A：检查 `Send` 是否正确实现；服务器发送 `init` 消息后才进行下一步。
