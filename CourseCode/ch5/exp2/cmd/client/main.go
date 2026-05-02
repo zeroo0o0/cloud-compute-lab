@@ -2,8 +2,8 @@ package main
 
 import (
 	"bufio"
-	"ch5/internal/proto"
-	render "ch5/internal/render"
+	"ch5/exp2/internal/proto"
+	render "ch5/exp2/internal/render"
 	"fmt"
 	"io"
 	"net"

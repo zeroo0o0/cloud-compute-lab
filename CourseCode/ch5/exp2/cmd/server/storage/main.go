@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"sync"
 
-	"ch5/internal/proto"
+	"ch5/exp2/internal/proto"
 )
 
 // 固定端口配置（演示专用，极简启动）

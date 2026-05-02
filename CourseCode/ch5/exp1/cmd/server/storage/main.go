@@ -1,7 +1,7 @@
 package main
 
 import (
-	"ch5/internal/proto"
+	"ch5/exp1/internal/proto"
 	"encoding/json"
 	"log"
 	"net/http"

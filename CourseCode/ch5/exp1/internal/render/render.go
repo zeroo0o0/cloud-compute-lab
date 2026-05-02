@@ -1,7 +1,7 @@
 package ch3render
 
 import (
-	"ch5/internal/proto"
+	"ch5/exp1/internal/proto"
 	"strings"
 )
 

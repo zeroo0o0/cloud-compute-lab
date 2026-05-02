@@ -8,6 +8,11 @@
 exp2/
 ├── go.mod                       # 独立模块：ch5/exp2
 ├── README.md                    # ← 本文件
+├── internal/                    # 本实验内部复用代码
+│   ├── proto/                   # 客户端、网关、game、storage 共用消息类型
+│   │   └── types.go
+│   └── render/                  # 客户端地图渲染工具
+│       └── render.go
 └── cmd/
     ├── client/                  # 演示客户端：TCP 连接 Gateway
     │   └── main.go              # 交互式命令行客户端，发送 GET/MOVE 并渲染地图
@@ -19,8 +24,6 @@ exp2/
         └── storage/             # 存储分片：内存实现、非持久化
             └── main.go          # 提供 /get 和 /set，作为状态唯一权威源
 ```
-
-说明：`internal/` 目录位于仓库根 `ch5/` 下，里面放的是 exp1 与 exp2 共用的类型和渲染代码。
 
 ## 一、启动服务（示例）
 

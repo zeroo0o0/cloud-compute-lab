@@ -106,3 +106,12 @@ images/virtual/ring_virtual_after.svg
 - 默认新增节点：如果初始节点数量为 `N`，新增节点为 `Node-N`
 - 默认玩家数量：`100000`
 - 虚拟节点版默认每个真实节点的虚拟节点数量：`20`
+
+## 最近修改内容
+
+- 将原来的 `cmd/demo` 改名为 `cmd/consistent_hash_physical`。
+- 将原来的 `cmd/demo_virtual` 改名为 `cmd/consistent_hash_virtual`。
+- 将图片输出目录拆分为 `images/physical` 和 `images/virtual`。
+- 虚拟节点版图片名称改为 `ring_virtual_before.svg` 和 `ring_virtual_after.svg`。
+- 将虚拟节点绘图文件整理为 `internal/ringviz/virtual.go`。
+- 虚拟节点版可视化调整为和物理节点版风格一致，并保留迁移区间弧线但去掉迁移区间编号。
