@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net"
-	// "time"
+	"os"
 )
 
-// GameMessage 定义网络传输结构体
 type GameMessage struct {
 	Action    string  `json:"action"`
 	PlayerID  int     `json:"player_id"`
@@ -18,9 +17,15 @@ type GameMessage struct {
 }
 
 func main() {
-	fmt.Println("=== 实验三：TCP 粘包处理与 JSON 序列化演示  ===")
+	addr := "127.0.0.1:8888"
+	if len(os.Args) > 1 {
+		addr = os.Args[1]
+	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:8888")
+	fmt.Println("=== 实验三：TCP 粘包处理与 JSON 序列化演示（服务端） ===")
+	fmt.Println("[服务端] listen", addr)
+
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		panic(err)
 	}
@@ -29,15 +34,21 @@ func main() {
 	runServer(listener)
 }
 
-// 核心函数 2：接收并拆包 (按长度头读取)
-func recvJSON(conn net.Conn, msg interface{}) error {
+func recvJSON(conn net.Conn, msg any) error {
 	var length uint32
 	err := binary.Read(conn, binary.BigEndian, &length)
 	if err != nil {
 		return err
 	}
+	/*
+		================ 【学生重点 第三章：粘包修复版】 ================
+		长度前缀把连续 TCP 字节流切回一条条应用层消息：
+		1. 先读 4 字节，得到下一条 JSON 的长度。
+		2. 再用 io.ReadFull 精确读满这条 JSON。
+		3. 最后才交给 json.Unmarshal。
+		============================================================
+	*/
 	payload := make([]byte, length)
-	// io.ReadFull 保证精确读取指定的字节数
 	_, err = io.ReadFull(conn, payload)
 	if err != nil {
 		return err
@@ -51,14 +62,10 @@ func runServer(listener net.Listener) {
 		return
 	}
 	defer conn.Close()
-	
+
 	fmt.Println("\n[服务端] 成功接收客户端连接！")
-	// fmt.Println("[服务端] 休眠 1 秒钟，暂时不读取网卡数据...")
-	// fmt.Println("[服务端] (等待客户端的多条消息在 TCP 底层缓冲区中发生物理堆积)")
-
-	// time.Sleep(1 * time.Second) 
-
 	fmt.Println("\n[服务端] 按照【4字节长度前缀】切割字节流...")
+
 	msgID := 1
 	for {
 		var msg GameMessage
@@ -71,8 +78,8 @@ func runServer(listener net.Listener) {
 			}
 			return
 		}
-		
-		fmt.Printf("[服务端-成功解包] 收到第%d条指令 -> [玩家:%d | 动作:%-6s | 坐标:(%.1f, %.1f)]\n", 
+
+		fmt.Printf("[服务端-成功解包] 收到第%d条指令 -> [玩家:%d | 动作:%-6s | 坐标:(%.1f, %.1f)]\n",
 			msgID, msg.PlayerID, msg.Action, msg.PositionX, msg.PositionY)
 
 		msgID++

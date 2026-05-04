@@ -108,6 +108,13 @@ func dialServer(host string) (net.Conn, *ch3net.ReliableConn) {
 }
 
 func recvLatestAfter(rc *ch3net.ReliableConn, lastFrame int, firstTimeout time.Duration) (ch3proto.WorldState, bool) {
+	/*
+		================ 【学生重点 第三章：只渲染最新帧】 ================
+		网络抖动时，客户端可能一次收到多帧历史状态。
+		这里先等到比 lastFrame 新的帧，再用短超时继续“追帧”，
+		最终只把最新状态交给渲染，避免旧帧刷屏拖慢画面。
+		============================================================
+	*/
 	var latest ch3proto.WorldState
 	deadline := time.Now().Add(firstTimeout)
 	for {
@@ -142,6 +149,13 @@ func recvLatestAfter(rc *ch3net.ReliableConn, lastFrame int, firstTimeout time.D
 }
 
 func recvRawFrame(conn net.Conn, timeout time.Duration) (ch3proto.WorldState, error) {
+	/*
+		================ 【学生重点 第三章：故意关闭拆包】 ================
+		粘包演示模式下，客户端直接 Read 原始字节并尝试当作一条 JSON 解析。
+		服务端连续写多条 JSON 时，这里很容易读到连体数据，从而复现错误。
+		正常模式应使用 ReliableConn/RecvJSON 的长度前缀协议。
+		============================================================
+	*/
 	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return ch3proto.WorldState{}, err
 	}

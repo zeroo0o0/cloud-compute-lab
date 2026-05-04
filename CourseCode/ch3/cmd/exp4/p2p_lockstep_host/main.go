@@ -79,6 +79,13 @@ func main() {
 	state := ch3game.State{P0: ch3game.Fighter{X: 1, Y: 1, HP: 100}, P1: ch3game.Fighter{X: 2, Y: 1, HP: 100}}
 
 	for frame := 1; frame <= 8; frame++ {
+		/*
+			================ 【学生重点 第三章：P2P 锁步帧】 ================
+			每一帧必须先交换输入，再计算状态。
+			如果对方输入没到，本端就停在 RecvJSON 等待，这正是“锁步”。
+			好处是双方都用同一份输入计算；代价是慢的一方会拖住这一帧。
+			============================================================
+		*/
 		fmt.Printf("[host frame %d] 输入(w/a/s/d/j): ", frame)
 		line, _ := reader.ReadString('\n')
 		local := parseInput(line)

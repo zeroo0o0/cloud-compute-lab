@@ -194,6 +194,13 @@ func main() {
 			if receivedAny {
 				timeout = quickTimeout
 			}
+			/*
+				================ 【学生重点 第三章：僵尸连接治理】 ================
+				单线程服务器仍然按玩家顺序读输入，但这里的 Recv 带超时。
+				某个玩家断网或不发包时，本帧把他当作 idle，主循环继续读下一个玩家。
+				这正好和 exp5_1 的阻塞读版本形成对照。
+				============================================================
+			*/
 			err := p.rc.Recv(timeout, &msg)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -254,6 +261,13 @@ func acceptReconnect(tcpLn *net.TCPListener) {
 	if offlineIdx == -1 {
 		return
 	}
+	/*
+		================ 【学生重点 第三章：重连只恢复连接】 ================
+		这里把离线玩家的新 TCP 连接接回原来的 player slot。
+		它解决的是“连接断了以后还能回来”，但完整生产系统还需要会话认证、
+		状态快照补发、历史输入处理等机制。
+		============================================================
+	*/
 	_ = tcpLn.SetDeadline(time.Now().Add(5 * time.Millisecond))
 	conn, err := tcpLn.Accept()
 	if err != nil {

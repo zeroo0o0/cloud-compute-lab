@@ -42,7 +42,13 @@ func main() {
 		}
 		id++
 		fmt.Printf("[blocking] 接受连接 #%d from %s\n", id, conn.RemoteAddr())
-		// *** 关键：直接调用而不是 go，导致阻塞 ***
+		/*
+			================ 【学生重点 第三章：阻塞式连接处理】 ================
+			这里直接调用 handleClient，而不是 go handleClient。
+			只要第一个客户端不断开，主 goroutine 就一直停在读写这个连接，
+			后续客户端即使完成 TCP 建连，也无法进入业务处理。
+			============================================================
+		*/
 		handleClient(conn, id)
 		// 只有这个客户端断开后才能 Accept 下一个
 	}

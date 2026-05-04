@@ -1,7 +1,7 @@
 # 英雄集结演示实验 —— 代码与演示说明
 
 > 本目录 (`ch4/`) 是一个**独立的 Go module**，围绕 Go 并发控制、锁机制、对象池优化和分层存储架构，提供 6 组可运行演示程序。
-> 实验 1~5 为本地或本机网络演示；实验 6 同时提供“纯内存简化版”和“Redis + PostgreSQL 完整版”，便于先讲架构分层，再讲真实基础设施。
+> 实验一至五为本地或本机网络演示；实验六同时提供“纯内存简化版”和“Redis + PostgreSQL 完整版”，便于先讲架构分层，再讲真实基础设施。
 
 ---
 
@@ -14,33 +14,35 @@ ch4/
 ├── README.md                           # ← 本文件
 ├── 英雄集结演示实验.md                  # 实验目标与讲解要点
 ├── internal/
-│   ├── exp6simple/demo.go              # 实验6简化版：纯内存持久层/缓存层演示
-│   └── exp6demo/demo.go                # 实验6共享：Redis/PostgreSQL 初始化与数据操作
+│   ├── exp6simple/demo.go              # 实验六简化版：纯内存持久层/缓存层演示
+│   └── exp6demo/demo.go                # 实验六共享：Redis/PostgreSQL 初始化与数据操作
 └── cmd/
     ├── README.md                       # cmd 子目录索引
-    ├── exp1/README.md                       # ① 实验一讲解顺序与知识点代码位置
-    ├── exp1/01_basic_serial_blocking_demo/  # ①-1 最小原理：串行阻塞
-    ├── exp1/02_network_serial_warzone/      # ①-2 Warzone 嵌入：串行收包反例
-    ├── exp1/03_basic_goroutine_receiver_demo/ # ①-3 最小原理：goroutine 收包
-    ├── exp1/04_network_goroutine_warzone/   # ①-4 Warzone 嵌入：goroutine 收包
-    ├── exp1/05_basic_event_driven_demo/     # ①-5 最小原理：事件驱动
-    ├── exp1/06_network_event_driven_warzone/ # ①-6 Warzone 嵌入：事件驱动 + 增量同步
-    ├── exp2/wrong/                     # ② 无锁竞态错误版
-    ├── exp2/right/                     # ② Mutex 修复版
-    ├── exp3/busy_wait/                 # ③ 忙等错误版
-    ├── exp3/cond_wait/                 # ③ Cond 等待唤醒版
-    ├── exp3/spurious_wakeup_demo/      # ③ 虚假唤醒极简演示
-    ├── exp4/channel_semaphore/         # ④ Channel 信号量
-    ├── exp4/channel_timeout_lock/      # ④ Channel 超时锁
-    ├── exp4/lock_cost_demo/            # ④ 锁代价极简演示
-    ├── exp4/rw_mutex/                  # ④ Mutex 与 RWMutex 对照
-    ├── exp5/sync_pool_demo/            # ⑤ sync.Pool 对象池优化
-    ├── exp5/connection_pool_demo/      # ⑤ 本机 TCP 连接池演示
-    ├── exp5/perf_observe_demo/         # ⑤ 性能观测工具教程
-    ├── exp6/write_through_simple_demo/ # ⑥ Write Through 简化版
-    ├── exp6/cache_aside_simple_demo/   # ⑥ Cache Aside 简化版
-    ├── exp6/write_through_demo/        # ⑥ Write Through 演示
-    └── exp6/cache_aside_demo/          # ⑥ Cache Aside 演示
+    ├── exp1/README.md                       # 实验一：服务器主循环解耦
+    ├── exp1/01_basic_serial_blocking_demo/  # 实验一：串行阻塞最小原理
+    ├── exp1/02_network_serial_warzone/      # 实验一：串行收包反例
+    ├── exp1/03_basic_goroutine_receiver_demo/ # 实验一：goroutine 收包最小原理
+    ├── exp1/04_network_goroutine_warzone/   # 实验一：goroutine 收包嵌入版
+    ├── exp1/05_basic_event_driven_demo/     # 实验一：事件驱动最小原理
+    ├── exp1/06_network_event_driven_warzone/ # 实验一：事件驱动 + 增量同步
+    ├── exp2/wrong/                     # 实验二：临界区与互斥锁（错误版）
+    ├── exp2/right/                     # 实验二：临界区与互斥锁（修复版）
+    ├── exp3/busy_wait/                 # 实验三：条件等待与唤醒（忙等版）
+    ├── exp3/cond_wait/                 # 实验三：条件等待与唤醒（Cond 版）
+    ├── exp3/spurious_wakeup_demo/      # 实验三：条件等待与唤醒（虚假唤醒）
+    ├── exp4/channel_semaphore/         # 实验四：锁策略与并发粒度（Channel 信号量）
+    ├── exp4/channel_timeout_lock/      # 实验四：锁策略与并发粒度（Channel 超时锁）
+    ├── exp4/lock_cost_demo/            # 实验四：锁策略与并发粒度（锁代价）
+    ├── exp4/rw_mutex/                  # 实验四：锁策略与并发粒度（RWMutex）
+    ├── exp5/sync_pool_demo/            # 实验五：对象复用与性能观测（sync.Pool）
+    ├── exp5/connection_pool_demo/      # 实验五：对象复用与性能观测（连接池）
+    │   ├── server/
+    │   └── client/
+    ├── exp5/perf_observe_demo/         # 实验五：对象复用与性能观测（pprof）
+    ├── exp6/write_through_simple_demo/ # 实验六：缓存与分层存储（Write Through 简化版）
+    ├── exp6/cache_aside_simple_demo/   # 实验六：缓存与分层存储（Cache Aside 简化版）
+    ├── exp6/write_through_demo/        # 实验六：缓存与分层存储（Write Through）
+    └── exp6/cache_aside_demo/          # 实验六：缓存与分层存储（Cache Aside）
 ```
 
 ---
@@ -73,7 +75,7 @@ go build ./...
 
 ## 实验六环境准备
 
-实验 6 现在有两组入口：
+实验六现在有两组入口：
 
 - 简化版：纯内存模拟持久层和缓存层，不需要 Docker、Redis、PostgreSQL。
 - 完整版：连接真实 Redis 和 PostgreSQL，用来观察真实中间件下的读写路径与一致性。
@@ -85,7 +87,7 @@ go run ./cmd/exp6/write_through_simple_demo
 go run ./cmd/exp6/cache_aside_simple_demo
 ```
 
-下面这部分环境准备只针对实验 6 的完整版。
+下面这部分环境准备只针对实验六的完整版。
 
 ### 1. 启动 Docker Desktop
 
@@ -164,7 +166,7 @@ export PG_DSN="postgres://你的用户名:你的密码@127.0.0.1:5432/postgres?s
 
 ### 5. 手动查库命令
 
-实验 6 运行前后，可以用以下命令确认 Redis / PostgreSQL 中的数据变化。
+实验六运行前后，可以用以下命令确认 Redis / PostgreSQL 中的数据变化。
 
 ```powershell
 # Redis：查看金币缓存
@@ -182,9 +184,9 @@ docker exec -it ch4-postgres psql -U 你的用户名 -d postgres -c "SELECT conf
 
 ---
 
-## 各步骤演示操作
+## 各实验演示操作
 
-### Step 1 — 突破单线程瓶颈
+### 实验一：服务器主循环解耦
 
 **对应页码**：第 4-6, 11-12, 15 页
 
@@ -253,7 +255,7 @@ go run ./cmd/exp1/06_network_event_driven_warzone/client -player slow
 
 ---
 
-### Step 2 — 临界区与数据竞争
+### 实验二：临界区与互斥锁
 
 **对应页码**：第 17-21 页
 
@@ -285,7 +287,7 @@ go run ./cmd/exp2/right -rounds 3 -auto
 
 ---
 
-### Step 3 — 告别忙等
+### 实验三：条件等待与唤醒
 
 **对应页码**：第 23-26, 42 页
 
@@ -335,7 +337,7 @@ go run ./cmd/exp3/spurious_wakeup_demo
 
 ---
 
-### Step 4 — 锁的进阶技巧与粒度优化
+### 实验四：锁策略与并发粒度
 
 **对应页码**：第 45-46, 49-51 页
 
@@ -396,7 +398,7 @@ go run ./cmd/exp4/rw_mutex
 
 ---
 
-### Step 5 — 高并发性能榨取
+### 实验五：对象复用与性能观测
 
 **对应页码**：第 54, 56, 58 页
 
@@ -422,10 +424,14 @@ go run ./cmd/exp5/sync_pool_demo after -requests 12000 -payload-kb 10 -work 500 
 
 **说明**：这里演示的是对象池，不是数据库连接池；两者都叫“池”，但资源类型和生命周期约束不同。
 
-#### 演示 2：网络连接池
+#### 演示 2：网络连接池（两个终端）
 
 ```powershell
-go run ./cmd/exp5/connection_pool_demo
+# 终端1：启动模拟游戏网关服务端
+go run ./cmd/exp5/connection_pool_demo/server
+
+# 终端2：运行短连接 / 连接池对比客户端
+go run ./cmd/exp5/connection_pool_demo/client
 ```
 
 **观察点**：短连接版本每个请求都 `Dial + Close`；连接池版本只创建少量长连接，后续请求从池子里借连接、用完再还。输出会直接对比建连次数和总耗时。
@@ -433,7 +439,8 @@ go run ./cmd/exp5/connection_pool_demo
 如果课堂机器太快，可以放大模拟建连成本：
 
 ```powershell
-go run ./cmd/exp5/connection_pool_demo -requests 240 -concurrency 24 -max-open 16 -max-idle 8 -lifetime-ms 200 -handshake-ms 50
+go run ./cmd/exp5/connection_pool_demo/server -handshake-ms 50
+go run ./cmd/exp5/connection_pool_demo/client -requests 240 -concurrency 24 -max-open 16 -max-idle 8 -lifetime-ms 200
 ```
 
 **贴近 PPT 的看法**：这个 demo 现在明确对应连接池初始化三项配置：
@@ -471,7 +478,7 @@ go run ./cmd/exp5/perf_observe_demo -mode leak -seconds 20
 
 ---
 
-### Step 6 — 游戏数据分层存储架构
+### 实验六：缓存与分层存储
 
 **对应页码**：第 61-63 页
 
@@ -520,26 +527,26 @@ docker exec -it ch4-redis redis-cli GET cfg:drop_rate
 
 ---
 
-## 各步骤资源与依赖对照
+## 各实验资源与依赖对照
 
-| 步骤 | 额外依赖 | 说明 |
+| 实验 | 额外依赖 | 说明 |
 |------|----------|------|
-| 1 | 无 | 本机网络并发演示 |
-| 2 | 无 | 单机并发演示 |
-| 3 | 无 | 单机并发演示 |
-| 4 | 无 | 单机并发演示 |
-| 5 | 无 | 单机性能演示 |
-| 6 | 简化版无；完整版需要 Redis + PostgreSQL | 建议通过 Docker 容器启动完整版 |
+| 实验一 | 无 | 本机网络并发演示 |
+| 实验二 | 无 | 单机并发演示 |
+| 实验三 | 无 | 单机并发演示 |
+| 实验四 | 无 | 单机并发演示 |
+| 实验五 | 无 | 单机性能演示 |
+| 实验六 | 简化版无；完整版需要 Redis + PostgreSQL | 建议通过 Docker 容器启动完整版 |
 
 ---
 
 ## 核心知识点对照表
 
-| 步骤 | 演示目标 | 关键结构/机制 |
+| 实验 | 演示目标 | 关键结构/机制 |
 |------|----------|----------------|
-| 1 | 单线程阻塞 vs 并发解耦 | goroutine、事件驱动、tick、增量同步 |
-| 2 | 数据竞争复现与修复 | `sync.Mutex` |
-| 3 | 忙等替换为阻塞等待 | `sync.Cond`、`Wait`、`Signal` |
-| 4 | 锁的进阶技巧 | Channel 信号量、超时锁、`sync.RWMutex` |
-| 5 | 临时对象复用 | `sync.Pool`、GC、尾延迟 |
-| 6 | 分层存储与缓存一致性 | Redis、PostgreSQL、Write Through、Cache Aside |
+| 实验一 | 单线程阻塞 vs 并发解耦 | goroutine、事件驱动、tick、增量同步 |
+| 实验二 | 数据竞争复现与修复 | `sync.Mutex` |
+| 实验三 | 忙等替换为阻塞等待 | `sync.Cond`、`Wait`、`Signal` |
+| 实验四 | 锁策略与并发粒度 | Channel 信号量、超时锁、`sync.RWMutex` |
+| 实验五 | 临时对象复用 | `sync.Pool`、GC、尾延迟 |
+| 实验六 | 分层存储与缓存一致性 | Redis、PostgreSQL、Write Through、Cache Aside |

@@ -4,21 +4,12 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
-
-type tcpServer struct {
-	listener       net.Listener
-	handshakeCost  time.Duration
-	requestCost    time.Duration
-	acceptedConns  atomic.Int64
-	handledRequest atomic.Int64
-}
 
 type pooledConn struct {
 	conn      net.Conn
@@ -60,63 +51,48 @@ type scenarioResult struct {
 	successReplies int64
 }
 
-func startTCPServer(handshakeCost, requestCost time.Duration) (*tcpServer, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return nil, err
+func main() {
+	addr := flag.String("addr", "127.0.0.1:9205", "服务端地址")
+	requests := flag.Int("requests", 160, "请求总数")
+	concurrency := flag.Int("concurrency", 16, "并发请求数")
+	maxOpen := flag.Int("max-open", 16, "连接池最大打开连接数")
+	maxIdle := flag.Int("max-idle", 8, "连接池最大空闲连接数")
+	lifetimeMS := flag.Int("lifetime-ms", 120, "连接最大生命周期（毫秒）")
+	flag.Parse()
+
+	if *requests < 1 || *concurrency < 1 || *maxOpen < 1 || *maxIdle < 1 {
+		fmt.Println("requests、concurrency、max-open、max-idle 都必须大于 0")
+		return
 	}
 
-	server := &tcpServer{
-		listener:      ln,
-		handshakeCost: handshakeCost,
-		requestCost:   requestCost,
+	cfg := poolConfig{
+		maxOpenConns:    *maxOpen,
+		maxIdleConns:    *maxIdle,
+		connMaxLifetime: time.Duration(*lifetimeMS) * time.Millisecond,
 	}
 
-	go server.acceptLoop()
-	return server, nil
-}
+	fmt.Println("=== 实验五：网络连接池客户端 ===")
+	fmt.Println("场景：连接到独立 TCP server，分别运行短连接和连接池两组请求。")
+	fmt.Println("初始化配置（贴近 PPT 的连接池三件套）：")
+	fmt.Printf("  maxOpenConns    = %d\n", cfg.maxOpenConns)
+	fmt.Printf("  maxIdleConns    = %d\n", cfg.maxIdleConns)
+	fmt.Printf("  connMaxLifetime = %s\n", cfg.connMaxLifetime)
+	fmt.Printf("  requests=%d, concurrency=%d, server=%s\n\n", *requests, *concurrency, *addr)
 
-func (s *tcpServer) acceptLoop() {
-	for {
-		conn, err := s.listener.Accept()
-		if err != nil {
-			return
-		}
-		s.acceptedConns.Add(1)
-		go s.handleConn(conn)
-	}
-}
+	shortConn := runShortConnection(*addr, *requests, *concurrency)
+	pooledConn := runConnectionPool(*addr, *requests, *concurrency, cfg)
 
-func (s *tcpServer) handleConn(conn net.Conn) {
-	defer conn.Close()
+	fmt.Println("结果对比：")
+	printResult(shortConn)
+	printResult(pooledConn)
 
-	// 模拟真实业务里“新连接才会额外支付”的成本：TLS 握手、鉴权、初始化上下文等。
-	time.Sleep(s.handshakeCost)
-
-	reader := bufio.NewReader(conn)
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err != io.EOF {
-				fmt.Printf("[server] read failed: %v\n", err)
-			}
-			return
-		}
-
-		time.Sleep(s.requestCost)
-		s.handledRequest.Add(1)
-		if _, err := fmt.Fprintf(conn, "ok:%s", line); err != nil {
-			return
-		}
-	}
-}
-
-func (s *tcpServer) addr() string {
-	return s.listener.Addr().String()
-}
-
-func (s *tcpServer) close() {
-	_ = s.listener.Close()
+	fmt.Println()
+	fmt.Printf("短连接 / 连接池：耗时约 %.1f 倍，建连次数从 %d 降到 %d。\n",
+		float64(shortConn.duration)/float64(pooledConn.duration),
+		shortConn.dials,
+		pooledConn.dials,
+	)
+	fmt.Println("[结论] 连接池的核心不是“永不关连接”，而是用 maxOpen / maxIdle / lifetime 控制连接的创建、复用和淘汰。")
 }
 
 func requestOnce(conn net.Conn, reader *bufio.Reader, requestID int) error {
@@ -395,57 +371,4 @@ func printResult(result scenarioResult) {
 		result.idleClosed,
 		result.duration.Round(time.Millisecond),
 	)
-}
-
-func main() {
-	requests := flag.Int("requests", 160, "请求总数")
-	concurrency := flag.Int("concurrency", 16, "并发请求数")
-	maxOpen := flag.Int("max-open", 16, "连接池最大打开连接数")
-	maxIdle := flag.Int("max-idle", 8, "连接池最大空闲连接数")
-	lifetimeMS := flag.Int("lifetime-ms", 120, "连接最大生命周期（毫秒）")
-	handshakeMS := flag.Int("handshake-ms", 30, "每条新连接的模拟建连/鉴权成本（毫秒）")
-	workMS := flag.Int("work-ms", 3, "每个请求的服务端处理时间（毫秒）")
-	flag.Parse()
-
-	if *requests < 1 || *concurrency < 1 || *maxOpen < 1 || *maxIdle < 1 {
-		fmt.Println("requests、concurrency、max-open、max-idle 都必须大于 0")
-		return
-	}
-
-	server, err := startTCPServer(time.Duration(*handshakeMS)*time.Millisecond, time.Duration(*workMS)*time.Millisecond)
-	if err != nil {
-		fmt.Printf("启动本机 TCP server 失败: %v\n", err)
-		return
-	}
-	defer server.close()
-
-	cfg := poolConfig{
-		maxOpenConns:    *maxOpen,
-		maxIdleConns:    *maxIdle,
-		connMaxLifetime: time.Duration(*lifetimeMS) * time.Millisecond,
-	}
-
-	fmt.Println("=== 实验五：网络连接池极简演示 ===")
-	fmt.Println("场景：本机 TCP server 模拟游戏网关；每条新连接都有握手/鉴权成本。")
-	fmt.Println("初始化配置（贴近 PPT 的连接池三件套）：")
-	fmt.Printf("  maxOpenConns    = %d\n", cfg.maxOpenConns)
-	fmt.Printf("  maxIdleConns    = %d\n", cfg.maxIdleConns)
-	fmt.Printf("  connMaxLifetime = %s\n", cfg.connMaxLifetime)
-	fmt.Printf("  requests=%d, concurrency=%d, handshake=%dms, work=%dms, server=%s\n\n",
-		*requests, *concurrency, *handshakeMS, *workMS, server.addr())
-
-	shortConn := runShortConnection(server.addr(), *requests, *concurrency)
-	pooledConn := runConnectionPool(server.addr(), *requests, *concurrency, cfg)
-
-	fmt.Println("结果对比：")
-	printResult(shortConn)
-	printResult(pooledConn)
-
-	fmt.Println()
-	fmt.Printf("短连接 / 连接池：耗时约 %.1f 倍，建连次数从 %d 降到 %d。\n",
-		float64(shortConn.duration)/float64(pooledConn.duration),
-		shortConn.dials,
-		pooledConn.dials,
-	)
-	fmt.Println("[结论] 连接池的核心不是“永不关连接”，而是用 maxOpen / maxIdle / lifetime 控制连接的创建、复用和淘汰。")
 }

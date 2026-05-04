@@ -60,6 +60,13 @@ func SendJSON(w io.Writer, v any) error {
 	if len(b) > int(^uint32(0)) {
 		return fmt.Errorf("payload too large: %d", len(b))
 	}
+	/*
+		================ 【学生重点 第三章：应用层消息边界】 ================
+		TCP 只保证字节按顺序到达，不保证一次 Write 对应一次 Read。
+		这里先写 4 字节长度，再写 JSON 正文，相当于给每条消息加“外包装”。
+		接收端只要先读长度，再按长度读满正文，就能避开粘包和半包。
+		================================================================
+	*/
 	var lenBuf [4]byte
 	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(b)))
 	if err := writeFull(w, lenBuf[:]); err != nil {
@@ -73,6 +80,13 @@ func RecvJSON(r io.Reader, out any) error {
 	if err := binary.Read(r, binary.LittleEndian, &n); err != nil {
 		return err
 	}
+	/*
+		================ 【学生重点 第三章：按长度拆包】 ================
+		io.ReadFull 会一直读到 n 个字节，或者返回错误。
+		这比直接 conn.Read(buffer) 更适合做协议解析，因为它把“读到多少”
+		从操作系统缓冲区的随机时机，改成了应用层协议约定的消息长度。
+		============================================================
+	*/
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return err

@@ -145,6 +145,14 @@ func main() {
 				continue
 			}
 			var msg ch3proto.InputMsg
+			/*
+				================ 【学生重点 第三章：僵尸玩家阻塞点】 ================
+				这一行没有设置读超时。
+				如果某个客户端进入“不发不收”的半开状态，RecvJSON 会一直等，
+				后面的 update 和 broadcast 都无法执行，整个房间看起来卡死。
+				这正是 Step7 ReliableConn 要修复的问题。
+				================================================================
+			*/
 			if err := ch3proto.RecvJSON(p.conn, &msg); err != nil {
 				fmt.Printf("[server] player#%d 断开: %v\n", p.id, err)
 				p.online = false
