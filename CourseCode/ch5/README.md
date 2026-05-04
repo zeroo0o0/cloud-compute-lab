@@ -18,15 +18,9 @@ ch5/
 │   │       └── README.md
 │   └── exp7/
 │       └── raft_election/
-│           └── main.go
+│           └── main.go          ← 多线程 Raft，每个节点一个 goroutine
 ├── internal/
-│   ├── exp6_2pc/
-│   │   ├── api.go
-│   │   ├── core/
-│   │   ├── scenario/
-│   │   ├── utils/
-│   │   └── demo_test.go
-│   └── exp7_raft/
+│   └── exp6_2pc/
 │       ├── api.go
 │       ├── core/
 │       ├── scenario/
@@ -45,8 +39,9 @@ ch5/
   - 详细文档见：`cmd/exp6/two_phase_commit/README.md`
 
 - `exp7`：Raft 领导者选举（Leader Election）
-  - 3 节点随机超时选主
-  - 支持 Leader 宕机后自动故障转移演示
+  - 每个节点在独立 goroutine 中运行，通过 channel 模拟 RequestVote / AppendEntries RPC
+  - 3 节点随机超时选主，支持 Leader 宕机后自动故障转移演示
+  - 核心算法逻辑集中在 main() 中，便于课堂讲解
 
 - `裂土封疆演示实验.md`
   - 章节级实验要求与课堂观察目标（实验一到实验七）
@@ -71,7 +66,7 @@ go run ./cmd/exp6/two_phase_commit -scenario normal -step-ms 900
 ### 实验七（Raft 选主）
 
 ```powershell
-go run ./cmd/exp7/raft_election -scenario leader_failover -step-ms 350 -seed 7
+go run ./cmd/exp7/raft_election -seed 7 -kill-after-ms 450
 ```
 
 ---
@@ -80,5 +75,4 @@ go run ./cmd/exp7/raft_election -scenario leader_failover -step-ms 350 -seed 7
 
 ```powershell
 go test ./internal/exp6_2pc
-go test ./internal/exp7_raft
 ```

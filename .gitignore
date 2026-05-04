@@ -55,6 +55,9 @@ logs/
 *.swp
 *.swo
 
+# claude code
+**/.claude/
+
 # ==================== Jupyter Notebook ====================
 # 忽略 Notebook 检查点文件（所有目录）
 **/.ipynb_checkpoints/
