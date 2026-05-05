@@ -1,41 +1,79 @@
-# 实验六：分布式事务 Two-Phase Commit（2PC）演示说明
+# 实验六：2PC 可视化流程演示（简化版）# 实验六：分布式事务 Two-Phase Commit（2PC）演示说明
 
-本目录对应第 5 章实验六，聚焦 2PC 的状态机、故障注入、稳定存储与恢复重放。
 
----
 
-## 入口与代码分层
+本目录提供更易理解的 2PC 演示：**1 个协调者 + 3 个参与者** 的结构化可视化，并通过 **按 Enter 逐步推进** 的方式展示状态变化与事件。本目录对应第 5 章实验六，聚焦 2PC 的状态机、故障注入、稳定存储与恢复重放。
 
-- 启动入口：`exp6/main.go`
+
+
+> 进阶版演示（包含完整日志与剧情渲染）已保留在 `exp6_bonus/`。---
+
+
+
+---## 入口与代码分层
+
+
+
+## 结构说明- 启动入口：`exp6/main.go`
+
   - 解析参数：`scenario`、`step-ms`、`data-dir`
 
-- 对外 API：`exp6/exp6_2pc/api.go`
-  - 对外暴露：`RunScenario`、`SetVisualStepDelay`、场景常量与状态常量
+- 上方：协调者服务（Service / Coordinator）
 
-- 核心协议：`exp6/exp6_2pc/core/engine.go`
+- 下方：三个数据库参与者（Worker）- 对外 API：`exp6/exp6_2pc/api.go`
+
+- 每一步展示：当前状态 + 事件播报  - 对外暴露：`RunScenario`、`SetVisualStepDelay`、场景常量与状态常量
+
+
+
+---- 核心协议：`exp6/exp6_2pc/core/engine.go`
+
   - 2PC 状态机：`INIT`、`WAIT`、`READY`、`COMMIT`、`ABORT`
-  - Coordinator / Worker 模型
+
+## 启动方式  - Coordinator / Worker 模型
+
   - 稳定存储日志写入与恢复读取
 
+在 `CourseCode/ch5` 目录执行：
+
 - 场景编排：`exp6/exp6_2pc/scenario/`
-  - `core_shared.go`：场景核心复用（统一 `runCore`、故障注入、步骤快照）
-  - `scenarios.go`：`normal/a/b/c/d` 场景配置与剧情渲染
+
+```powershell  - `core_shared.go`：场景核心复用（统一 `runCore`、故障注入、步骤快照）
+
+go run ./exp6 -scenario all  - `scenarios.go`：`normal/a/b/c/d` 场景配置与剧情渲染
+
+```
 
 - 渲染工具：`exp6/exp6_2pc/utils/renderer.go`
-  - 电影式对白与输出节奏控制
 
-- 测试：`exp6/exp6_2pc/demo_test.go`
-  - `TestScenarioNormalCommit`
+参数说明：  - 电影式对白与输出节奏控制
+
+
+
+- `-scenario all`：依次播放正常 + 故障 A/B/C/D- 测试：`exp6/exp6_2pc/demo_test.go`
+
+- `-scenario normal|a|b|c|d`：单场景演示  - `TestScenarioNormalCommit`
+
   - `TestScenarioDRecoveryReplaysCommit`
 
 ---
 
+---
+
+## 场景说明
+
 ## 启动方式
 
-在 `CourseCode/ch5` 目录执行：
+- `normal`：正常提交
 
-```powershell
-go run ./exp6 -scenario all -step-ms 900
+- `a`：参与者拒票 → 全局回滚在 `CourseCode/ch5` 目录执行：
+
+- `b`：参与者超时 → 全局回滚
+
+- `c`：协调者在 Phase-1 崩溃 → 参与者超时回滚```powershell
+
+- `d`：协调者写入决议后崩溃 → 恢复重放提交go run ./exp6 -scenario all -step-ms 900
+
 go run ./exp6 -scenario normal -step-ms 900
 ```
 

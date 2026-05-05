@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"math/rand"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,9 +19,9 @@ import (
 
 // RequestVoteMsg: 候选人向其他节点发送的"拉票请求"（RequestVote RPC）
 type RequestVoteMsg struct {
-	Term         int            // 候选人的当前任期
-	CandidateID  int            // 候选人 ID
-	RespCh       chan bool       // 用于返回投票结果（true=赞成票, false=反对票）
+	Term        int       // 候选人的当前任期
+	CandidateID int       // 候选人 ID
+	RespCh      chan bool // 用于返回投票结果（true=赞成票, false=反对票）
 }
 
 // AppendEntriesMsg: Leader 向其他节点发送的"心跳/日志复制"（AppendEntries RPC）
@@ -39,17 +42,25 @@ const (
 )
 
 type node struct {
-	ID      int
-	mu      sync.Mutex // 保护节点状态的并发访问
-	Role    role
-	Term    int
+	ID       int
+	mu       sync.Mutex // 保护节点状态的并发访问
+	Role     role
+	Term     int
 	VotedFor int  // 本任期内投票给了谁（0=未投票）
-	Alive   bool // 节点是否存活
+	Alive    bool // 节点是否存活
 
 	// 消息通道：模拟网络通信
 	requestVoteCh   chan RequestVoteMsg   // 接收 RequestVote RPC
 	appendEntriesCh chan AppendEntriesMsg // 接收 AppendEntries RPC
 	done            chan struct{}         // 用于终止节点 goroutine
+}
+
+type nodeSnapshot struct {
+	ID       int
+	Role     role
+	Term     int
+	VotedFor int
+	Alive    bool
 }
 
 // ── 配置 ─────────────────────────────────────────────────────────────────────
@@ -104,7 +115,7 @@ func main() {
 	}
 
 	// 用于通知主函数"新 Leader 已当选"
-	leaderCh := make(chan int, 1)
+	leaderCh := make(chan int, 8)
 
 	// ── 第三步：启动所有节点 ──────────────────────────────────────────────────
 	// 每个节点在独立的 goroutine 中运行，模拟分布式环境中的并发行为
@@ -112,11 +123,14 @@ func main() {
 	for i := 1; i <= cfg.NodeCount; i++ {
 		go runNode(nodes[i], nodes, cfg, rng, leaderCh)
 	}
-	fmt.Println("[启动] 3 个节点已启动，全部为 Follower，开始随机超时选举...")
+
+	renderCluster("集群启动", "3 个节点已启动，全部为 Follower", nodes)
+	waitForEnter("按 Enter 继续，等待首任 Leader 当选...")
 
 	// ── 第四步：等待首任 Leader 当选 ──────────────────────────────────────────
 	initialLeader := <-leaderCh
-	fmt.Printf("[选举完成] Node-%d 当选为首任 Leader\n", initialLeader)
+	renderCluster("首任 Leader 当选", fmt.Sprintf("Node-%d 当选为首任 Leader", initialLeader), nodes)
+	waitForEnter("按 Enter 继续，准备模拟 Leader 宕机...")
 
 	// ── 第五步：模拟 Leader 宕机 ──────────────────────────────────────────────
 	time.Sleep(cfg.KillLeaderAfter)
@@ -124,22 +138,19 @@ func main() {
 	nodes[initialLeader].Alive = false
 	nodes[initialLeader].Role = roleFollower
 	nodes[initialLeader].mu.Unlock()
-	// 向节点发送终止信号
 	close(nodes[initialLeader].done)
-	fmt.Printf("[宕机模拟] Leader Node-%d 已崩溃，等待自动故障转移...\n", initialLeader)
+	renderCluster("Leader 宕机", fmt.Sprintf("Leader Node-%d 已崩溃", initialLeader), nodes)
+	waitForEnter("按 Enter 继续，等待新 Leader 当选...")
 
 	// ── 第六步：等待新 Leader 当选（故障转移） ────────────────────────────────
-	select {
-	case newLeader := <-leaderCh:
-		finalTerm := getNodeTerm(nodes[newLeader])
-		fmt.Printf("[故障转移完成] Node-%d 当选为新 Leader\n", newLeader)
-		fmt.Println("============================================================")
-		fmt.Printf("初始 Leader: Node-%d\n", initialLeader)
-		fmt.Printf("故障后 Leader: Node-%d\n", newLeader)
-		fmt.Printf("最终 Term: %d\n", finalTerm)
-	case <-time.After(5 * time.Second):
+	newLeader, ok := waitForNewLeader(leaderCh, initialLeader, 5*time.Second)
+	if !ok {
 		fmt.Println("[超时] 未能在规定时间内完成故障转移")
+		return
 	}
+	finalTerm := getNodeTerm(nodes[newLeader])
+	renderCluster("故障转移完成", fmt.Sprintf("Node-%d 当选为新 Leader（Term=%d）", newLeader, finalTerm), nodes)
+	waitForEnter("按 Enter 结束演示...")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -230,9 +241,9 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 
 // handleRequestVote: 处理来自候选人的投票请求（RequestVote RPC）
 // Raft 规则：
-//   1. 如果请求的任期 < 当前任期 → 拒绝（过期的候选人）
-//   2. 如果请求的任期 > 当前任期 → 更新任期，转为 Follower
-//   3. 每个任期只能投一票（先到先得）
+//  1. 如果请求的任期 < 当前任期 → 拒绝（过期的候选人）
+//  2. 如果请求的任期 > 当前任期 → 更新任期，转为 Follower
+//  3. 每个任期只能投一票（先到先得）
 func handleRequestVote(n *node, msg RequestVoteMsg) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -259,8 +270,8 @@ func handleRequestVote(n *node, msg RequestVoteMsg) bool {
 
 // handleAppendEntries: 处理来自 Leader 的心跳/日志复制请求（AppendEntries RPC）
 // Raft 规则：
-//   1. 如果 Leader 的任期 < 当前任期 → 拒绝（过期的 Leader）
-//   2. 否则接受心跳，重置选举超时，转为 Follower
+//  1. 如果 Leader 的任期 < 当前任期 → 拒绝（过期的 Leader）
+//  2. 否则接受心跳，重置选举超时，转为 Follower
 func handleAppendEntries(n *node, msg AppendEntriesMsg, cfg config, rng *rand.Rand) (bool, time.Duration) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -339,4 +350,116 @@ func countAliveNodes(nodes []*node) int {
 		}
 	}
 	return count
+}
+
+func waitForNewLeader(leaderCh chan int, exclude int, timeout time.Duration) (int, bool) {
+	deadline := time.After(timeout)
+	for {
+		select {
+		case id := <-leaderCh:
+			if id != exclude {
+				return id, true
+			}
+		case <-deadline:
+			return 0, false
+		}
+	}
+}
+
+func waitForEnter(prompt string) {
+	fmt.Println(prompt)
+	reader := bufio.NewReader(os.Stdin)
+	_, _ = reader.ReadString('\n')
+}
+
+func renderCluster(title, note string, nodes []*node) {
+	snapshots := snapshotNodes(nodes)
+	fmt.Println("============================================================")
+	fmt.Println(title)
+	fmt.Printf("事件：%s\n\n", note)
+	if len(snapshots) == 0 {
+		fmt.Println("[提示] 无可用节点")
+		return
+	}
+	boxes := make([][]string, 0, len(snapshots))
+	for _, s := range snapshots {
+		boxes = append(boxes, makeNodeBox(s, 24))
+	}
+	maxLines := len(boxes[0])
+	for i := 0; i < maxLines; i++ {
+		lineParts := make([]string, 0, len(boxes))
+		for _, box := range boxes {
+			lineParts = append(lineParts, box[i])
+		}
+		fmt.Println(strings.Join(lineParts, "  "))
+	}
+	fmt.Println()
+}
+
+func snapshotNodes(nodes []*node) []nodeSnapshot {
+	snapshots := make([]nodeSnapshot, 0, len(nodes))
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		n.mu.Lock()
+		snapshots = append(snapshots, nodeSnapshot{
+			ID:       n.ID,
+			Role:     n.Role,
+			Term:     n.Term,
+			VotedFor: n.VotedFor,
+			Alive:    n.Alive,
+		})
+		n.mu.Unlock()
+	}
+	return snapshots
+}
+
+func makeNodeBox(s nodeSnapshot, width int) []string {
+	contentWidth := width - 2
+	vote := "-"
+	if s.VotedFor != 0 {
+		vote = fmt.Sprintf("%d", s.VotedFor)
+	}
+	lines := []string{
+		fmt.Sprintf("Node-%d", s.ID),
+		fmt.Sprintf("Role: %s", s.Role),
+		fmt.Sprintf("Term: %d", s.Term),
+		fmt.Sprintf("Vote: %s", vote),
+		fmt.Sprintf("Note: %s", nodeNote(s)),
+	}
+	for i, line := range lines {
+		lines[i] = padRight(line, contentWidth)
+	}
+	box := []string{"+" + strings.Repeat("-", contentWidth) + "+"}
+	for _, line := range lines {
+		box = append(box, "|"+line+"|")
+	}
+	box = append(box, "+"+strings.Repeat("-", contentWidth)+"+")
+	return box
+}
+
+func nodeNote(s nodeSnapshot) string {
+	if !s.Alive {
+		return "DOWN"
+	}
+	switch s.Role {
+	case roleLeader:
+		return "Leader"
+	case roleCandidate:
+		return "Target: Self"
+	case roleFollower:
+		if s.VotedFor != 0 {
+			return fmt.Sprintf("Voted %d", s.VotedFor)
+		}
+	}
+	return "-"
+}
+
+func padRight(text string, width int) string {
+	runes := []rune(text)
+	if len(runes) >= width {
+		return string(runes[:width])
+	}
+	return text + strings.Repeat(" ", width-len(runes))
 }

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"ch5/exp6/exp6_2pc/core"
+	"ch5/exp6_bonus/exp6_2pc/core"
 )
 
 type coreStep struct {

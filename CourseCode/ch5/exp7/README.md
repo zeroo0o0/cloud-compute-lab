@@ -8,7 +8,8 @@
 
 - 启动入口：`exp7/main.go`
   - 解析参数：`seed`、`kill-after-ms`
-  - 创建节点、启动 goroutine、等待 Leader 当选
+  - 创建节点、启动 goroutine
+  - 逐步可视化展示 Leader 选举与故障转移
 
 > 说明：本实验主要用单文件展示完整流程，便于课堂讲解与阅读。
 
@@ -35,3 +36,4 @@ go run ./exp7 -seed 7 -kill-after-ms 450
 - Candidate 拉票、获得多数派后当选 Leader
 - Leader 定期心跳维持领导权
 - Leader 故障后，其余节点自动选举新 Leader
+- 演示过程中按 Enter 逐步推进，观察节点状态变化
