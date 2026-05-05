@@ -49,6 +49,9 @@ type node struct {
 	VotedFor int  // 本任期内投票给了谁（0=未投票）
 	Alive    bool // 节点是否存活
 
+	ElectionTimeout time.Duration // 当前随机选举超时
+	TimeoutLeft     time.Duration // 剩余倒计时（Follower/Candidate 使用）
+
 	// 消息通道：模拟网络通信
 	requestVoteCh   chan RequestVoteMsg   // 接收 RequestVote RPC
 	appendEntriesCh chan AppendEntriesMsg // 接收 AppendEntries RPC
@@ -61,6 +64,13 @@ type nodeSnapshot struct {
 	Term     int
 	VotedFor int
 	Alive    bool
+	Timeout  time.Duration
+	Left     time.Duration
+}
+
+type candidateEvent struct {
+	ID   int
+	Term int
 }
 
 // ── 配置 ─────────────────────────────────────────────────────────────────────
@@ -116,16 +126,26 @@ func main() {
 
 	// 用于通知主函数"新 Leader 已当选"
 	leaderCh := make(chan int, 8)
+	candidateCh := make(chan candidateEvent, 8)
 
 	// ── 第三步：启动所有节点 ──────────────────────────────────────────────────
 	// 每个节点在独立的 goroutine 中运行，模拟分布式环境中的并发行为
 	rng := rand.New(rand.NewSource(*seed))
 	for i := 1; i <= cfg.NodeCount; i++ {
-		go runNode(nodes[i], nodes, cfg, rng, leaderCh)
+		initialTimeout := randomElectionTimeout(rng, cfg.MinElectionTimeout, cfg.MaxElectionTimeout)
+		nodes[i].mu.Lock()
+		nodes[i].ElectionTimeout = initialTimeout
+		nodes[i].TimeoutLeft = initialTimeout
+		nodes[i].mu.Unlock()
+		go runNode(nodes[i], nodes, cfg, rng, leaderCh, candidateCh, initialTimeout)
 	}
 
 	renderCluster("集群启动", "3 个节点已启动，全部为 Follower", nodes)
-	waitForEnter("按 Enter 继续，等待首任 Leader 当选...")
+	waitForEnter("按 Enter 继续，观察随机选举倒计时...")
+	if ev, ok := waitForCandidate(candidateCh, 2*time.Second); ok {
+		renderCluster("Candidate 发起选举", fmt.Sprintf("Node-%d 转为 Candidate（Term=%d）", ev.ID, ev.Term), nodes)
+		waitForEnter("按 Enter 继续，等待首任 Leader 当选...")
+	}
 
 	// ── 第四步：等待首任 Leader 当选 ──────────────────────────────────────────
 	initialLeader := <-leaderCh
@@ -140,7 +160,11 @@ func main() {
 	nodes[initialLeader].mu.Unlock()
 	close(nodes[initialLeader].done)
 	renderCluster("Leader 宕机", fmt.Sprintf("Leader Node-%d 已崩溃", initialLeader), nodes)
-	waitForEnter("按 Enter 继续，等待新 Leader 当选...")
+	waitForEnter("按 Enter 继续，观察新一轮随机倒计时...")
+	if ev, ok := waitForCandidate(candidateCh, 2*time.Second); ok {
+		renderCluster("Candidate 发起选举", fmt.Sprintf("Node-%d 转为 Candidate（Term=%d）", ev.ID, ev.Term), nodes)
+		waitForEnter("按 Enter 继续，等待新 Leader 当选...")
+	}
 
 	// ── 第六步：等待新 Leader 当选（故障转移） ────────────────────────────────
 	newLeader, ok := waitForNewLeader(leaderCh, initialLeader, 5*time.Second)
@@ -157,9 +181,10 @@ func main() {
 // 节点运行函数：每个节点在此函数中独立运行
 // 核心逻辑：定时器驱动 + 消息处理（Select 多路复用）
 // ═══════════════════════════════════════════════════════════════════════════════
-func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh chan int) {
-	// 为当前节点生成随机的选举超时时间（Raft 关键机制：避免同时发起选举）
-	electionTimeout := randomElectionTimeout(rng, cfg.MinElectionTimeout, cfg.MaxElectionTimeout)
+func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh chan int, candidateCh chan candidateEvent, initialTimeout time.Duration) {
+	// 使用预先生成的随机超时作为初始倒计时
+	electionTimeout := initialTimeout
+	setTimeout(n, electionTimeout)
 	electionTimer := time.NewTicker(cfg.Tick)
 	heartbeatTimer := time.NewTicker(cfg.HeartbeatInterval)
 	defer electionTimer.Stop()
@@ -178,6 +203,7 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 			msg.RespCh <- ok
 			if ok {
 				electionTimeout = newTimeout // 心跳成功，重置选举超时
+				setTimeout(n, electionTimeout)
 			}
 
 		// ── Leader 定期发送心跳 ─────────────────────────────────────────
@@ -192,6 +218,7 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 				continue
 			}
 			electionTimeout -= cfg.Tick
+			setTimeoutLeft(n, electionTimeout)
 			if electionTimeout > 0 {
 				continue
 			}
@@ -201,8 +228,14 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 			n.Role = roleCandidate
 			n.Term++
 			n.VotedFor = n.ID
+			term := n.Term
 			n.mu.Unlock()
+			select {
+			case candidateCh <- candidateEvent{ID: n.ID, Term: term}:
+			default:
+			}
 			electionTimeout = randomElectionTimeout(rng, cfg.MinElectionTimeout, cfg.MaxElectionTimeout)
+			setTimeout(n, electionTimeout)
 
 			// 向所有其他节点发送 RequestVote RPC，收集选票
 			votes := 1 // 先投自己一票
@@ -220,6 +253,8 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 			if votes > aliveCount/2 {
 				n.mu.Lock()
 				n.Role = roleLeader
+				n.TimeoutLeft = 0
+				n.ElectionTimeout = 0
 				n.mu.Unlock()
 				// 通知主函数：新 Leader 已当选
 				select {
@@ -352,6 +387,31 @@ func countAliveNodes(nodes []*node) int {
 	return count
 }
 
+func waitForCandidate(candidateCh chan candidateEvent, timeout time.Duration) (candidateEvent, bool) {
+	deadline := time.After(timeout)
+	for {
+		select {
+		case ev := <-candidateCh:
+			return ev, true
+		case <-deadline:
+			return candidateEvent{}, false
+		}
+	}
+}
+
+func setTimeout(n *node, timeout time.Duration) {
+	n.mu.Lock()
+	n.ElectionTimeout = timeout
+	n.TimeoutLeft = timeout
+	n.mu.Unlock()
+}
+
+func setTimeoutLeft(n *node, left time.Duration) {
+	n.mu.Lock()
+	n.TimeoutLeft = left
+	n.mu.Unlock()
+}
+
 func waitForNewLeader(leaderCh chan int, exclude int, timeout time.Duration) (int, bool) {
 	deadline := time.After(timeout)
 	for {
@@ -409,6 +469,8 @@ func snapshotNodes(nodes []*node) []nodeSnapshot {
 			Term:     n.Term,
 			VotedFor: n.VotedFor,
 			Alive:    n.Alive,
+			Timeout:  n.ElectionTimeout,
+			Left:     n.TimeoutLeft,
 		})
 		n.mu.Unlock()
 	}
@@ -426,6 +488,8 @@ func makeNodeBox(s nodeSnapshot, width int) []string {
 		fmt.Sprintf("Role: %s", s.Role),
 		fmt.Sprintf("Term: %d", s.Term),
 		fmt.Sprintf("Vote: %s", vote),
+		fmt.Sprintf("TO: %s", formatTimeout(s.Timeout)),
+		fmt.Sprintf("Left: %s", formatTimeout(s.Left)),
 		fmt.Sprintf("Note: %s", nodeNote(s)),
 	}
 	for i, line := range lines {
@@ -454,6 +518,13 @@ func nodeNote(s nodeSnapshot) string {
 		}
 	}
 	return "-"
+}
+
+func formatTimeout(d time.Duration) string {
+	if d <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%dms", d.Milliseconds())
 }
 
 func padRight(text string, width int) string {
