@@ -1,9 +1,9 @@
 package exp6_2pc
 
 import (
-	"ch5/exp6_bonus/exp6_2pc/core"
-	"ch5/exp6_bonus/exp6_2pc/scenario"
-	"ch5/exp6_bonus/exp6_2pc/utils"
+	"exp6_bonus/exp6_2pc/core"
+	"exp6_bonus/exp6_2pc/scenario"
+	"exp6_bonus/exp6_2pc/utils"
 )
 
 type PlanState = core.PlanState

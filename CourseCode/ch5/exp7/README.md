@@ -29,17 +29,17 @@ exp7/
 
 ## 启动方式
 
-打开 **3 个终端**，在 `CourseCode/ch5` 目录下分别执行：
+打开 **3 个终端**，在项目根目录下分别执行：
 
 ```powershell
 # 终端 1
-go run ./exp7 -id 1 -port 8001 -peers localhost:8002,localhost:8003
+go run -C ./CourseCode/ch5/exp7 . -id 1 -port 8001 -peers localhost:8002,localhost:8003
 
 # 终端 2
-go run ./exp7 -id 2 -port 8002 -peers localhost:8001,localhost:8003
+go run -C ./CourseCode/ch5/exp7 . -id 2 -port 8002 -peers localhost:8001,localhost:8003
 
 # 终端 3
-go run ./exp7 -id 3 -port 8003 -peers localhost:8001,localhost:8002
+go run -C ./CourseCode/ch5/exp7 . -id 3 -port 8003 -peers localhost:8001,localhost:8002
 ```
 
 参数说明：

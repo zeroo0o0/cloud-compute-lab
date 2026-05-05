@@ -32,11 +32,11 @@
 
 ## 启动方式
 
-在 `CourseCode/ch5` 目录执行：
+在项目根目录下执行：
 
 ```powershell
-go run ./exp6_bonus -scenario all -step-ms 900
-go run ./exp6_bonus -scenario normal -step-ms 900
+go run -C ./CourseCode/ch5/exp6_bonus . -scenario all -step-ms 900
+go run -C ./CourseCode/ch5/exp6_bonus . -scenario normal -step-ms 900
 ```
 
 参数说明：

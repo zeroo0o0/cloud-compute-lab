@@ -24,17 +24,14 @@ exp6/
 
 ## 启动方式
 
-在 `CourseCode/ch5` 目录下执行：
+在项目根目录下执行：
 
 ```powershell
-# 正常流程
-go run ./exp6/normal
-
-# 故障场景
-go run ./exp6/fault_a
-go run ./exp6/fault_b
-go run ./exp6/fault_c
-go run ./exp6/fault_d
+go run -C ./CourseCode/ch5/exp6 ./normal       # 正常流程
+go run -C ./CourseCode/ch5/exp6 ./fault_a      # 故障A：参与者拒票
+go run -C ./CourseCode/ch5/exp6 ./fault_b      # 故障B：参与者超时
+go run -C ./CourseCode/ch5/exp6 ./fault_c      # 故障C：协调者投票前崩溃
+go run -C ./CourseCode/ch5/exp6 ./fault_d      # 故障D：决议写入后崩溃（日志恢复重放）
 ```
 
 ---
