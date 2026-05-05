@@ -103,7 +103,6 @@ func (n *Node) handleAppendEntries(w http.ResponseWriter, r *http.Request) {
 		n.leaderID = req.LeaderID
 		resp.Success = true
 		resp.Term = n.currentTerm
-		n.log("received heartbeat from Leader %d, reset election timer", req.LeaderID)
 		n.mu.Unlock()
 		// 收到合法心跳，重置选举超时
 		select {

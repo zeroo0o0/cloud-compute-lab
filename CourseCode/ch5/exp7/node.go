@@ -115,10 +115,6 @@ func (n *Node) run() {
 			n.mu.Unlock()
 
 			for _, peer := range peers {
-				n.mu.Lock()
-				n.log("send heartbeat to %s", peer)
-				n.mu.Unlock()
-
 				resp, err := n.sendAppendEntries(peer, AppendEntriesReq{
 					Term:     term,
 					LeaderID: n.ID,
@@ -127,8 +123,8 @@ func (n *Node) run() {
 					continue // 连接失败，不崩溃
 				}
 				// 如果响应的 term 更高，说明有更新的 Leader，退回 Follower
-				n.mu.Lock()
 				if resp.Term > n.currentTerm {
+					n.mu.Lock()
 					n.currentTerm = resp.Term
 					n.state = Follower
 					n.votedFor = -1
@@ -137,7 +133,6 @@ func (n *Node) run() {
 					n.mu.Unlock()
 					break
 				}
-				n.mu.Unlock()
 			}
 		}
 	}
