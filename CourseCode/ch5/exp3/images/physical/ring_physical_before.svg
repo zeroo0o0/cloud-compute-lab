@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1400" viewBox="0 0 1440 1400">
+<rect x="0" y="0" width="1440" height="1400" fill="#f7f4ea"/>
+<rect x="40" y="40" width="1360" height="1320" rx="30" fill="#fffdf8" stroke="#e7e5e4" stroke-width="2"/>
+<text x="70" y="86" font-size="34" font-family="Segoe UI" font-weight="700" fill="#111827">一致性哈希环（物理节点版，扩容前）</text>
+<text x="70" y="122" font-size="19" font-family="Segoe UI" fill="#475569">每个物理节点在环上只占一个位置，并负责从前驱节点到自己之间的顺时针区间。</text>
+<text x="70" y="152" font-size="19" font-family="Segoe UI" fill="#475569">物理节点数=3，环上节点数=3</text>
+<circle cx="560.0" cy="700.0" r="330.0" fill="none" stroke="#334155" stroke-width="4"/>
+<text x="707.3" y="469.0" font-size="13" font-family="Segoe UI" fill="#64748b" text-anchor="middle">归属 Node-1</text>
+<text x="759.6" y="887.7" font-size="13" font-family="Segoe UI" fill="#64748b" text-anchor="middle">归属 Node-0</text>
+<text x="287.4" y="727.6" font-size="13" font-family="Segoe UI" fill="#64748b" text-anchor="middle">归属 Node-2</text>
+<line x1="886.4" y1="651.5" x2="980.4" y2="637.6" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 6"/>
+<circle cx="886.4" cy="651.5" r="14" fill="#64748b" stroke="#0f172a" stroke-width="2.5"/>
+<rect x="982.4" y="613.6" width="128" height="44" rx="10" fill="#fffdf8" stroke="#d6d3d1" stroke-width="1.5"/>
+<text x="990.4" y="632.6" font-size="16" font-family="Segoe UI" font-weight="700" fill="#111827" text-anchor="start">Node-1</text>
+<text x="990.4" y="651.6" font-size="12" font-family="Consolas" fill="#475569" text-anchor="start">hash=0972961432</text>
+<line x1="531.5" y1="1028.8" x2="523.3" y2="1123.4" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 6"/>
+<circle cx="531.5" cy="1028.8" r="14" fill="#64748b" stroke="#0f172a" stroke-width="2.5"/>
+<rect x="393.3" y="1099.4" width="128" height="44" rx="10" fill="#fffdf8" stroke="#d6d3d1" stroke-width="1.5"/>
+<text x="513.3" y="1118.4" font-size="16" font-family="Segoe UI" font-weight="700" fill="#111827" text-anchor="end">Node-0</text>
+<text x="513.3" y="1137.4" font-size="12" font-family="Consolas" fill="#475569" text-anchor="end">hash=2206562312</text>
+<line x1="466.2" y1="383.6" x2="439.3" y2="292.5" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 6"/>
+<circle cx="466.2" cy="383.6" r="14" fill="#64748b" stroke="#0f172a" stroke-width="2.5"/>
+<rect x="309.3" y="268.5" width="128" height="44" rx="10" fill="#fffdf8" stroke="#d6d3d1" stroke-width="1.5"/>
+<text x="429.3" y="287.5" font-size="16" font-family="Segoe UI" font-weight="700" fill="#111827" text-anchor="end">Node-2</text>
+<text x="429.3" y="306.5" font-size="12" font-family="Consolas" fill="#475569" text-anchor="end">hash=4098045632</text>
+<rect x="1110.0" y="96.0" width="290" height="212" rx="18" fill="#fffdf7" stroke="#d6d3d1" stroke-width="1.5"/>
+<text x="1130.0" y="130.0" font-size="22" font-family="Segoe UI" font-weight="700" fill="#1f2937">图例</text>
+<circle cx="1136.0" cy="162.0" r="11" fill="#64748b" stroke="#0f172a" stroke-width="2"/>
+<text x="1158.0" y="168.0" font-size="17" font-family="Segoe UI" fill="#334155">原有节点</text>
+<circle cx="1136.0" cy="198.0" r="11" fill="#e76f51" stroke="#0f172a" stroke-width="2"/>
+<text x="1158.0" y="204.0" font-size="17" font-family="Segoe UI" fill="#334155">新增节点</text>
+<line x1="1126.0" y1="234.0" x2="1148.0" y2="234.0" stroke="#dc2626" stroke-width="8" stroke-linecap="round"/>
+<text x="1158.0" y="240.0" font-size="17" font-family="Segoe UI" fill="#334155">迁移区间</text>
+<line x1="1126.0" y1="270.0" x2="1148.0" y2="270.0" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="6 6"/>
+<text x="1158.0" y="276.0" font-size="17" font-family="Segoe UI" fill="#334155">标注引线</text>
+<text x="1130.0" y="298.0" font-size="16" font-family="Segoe UI" fill="#64748b">环内文字表示顺时针方向的区间归属。</text>
+</svg>
