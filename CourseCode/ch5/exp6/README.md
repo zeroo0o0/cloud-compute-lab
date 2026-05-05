@@ -14,7 +14,7 @@ exp6/
 ├── fault_a/main.go     # 故障A：参与者拒票（一票否决）
 ├── fault_b/main.go     # 故障B：参与者超时无响应
 ├── fault_c/main.go     # 故障C：协调者第一阶段崩溃
-├── fault_d/main.go     # 故障D：协调者决议写入后崩溃
+├── fault_d/main.go     # 故障D：协调者决议写入后崩溃（日志恢复重放）
 └── README.md
 ```
 
@@ -24,17 +24,17 @@ exp6/
 
 ## 启动方式
 
-在 `CourseCode/ch5/exp6` 目录下执行：
+在 `CourseCode/ch5` 目录下执行：
 
 ```powershell
 # 正常流程
-go run ./normal
+go run ./exp6/normal
 
 # 故障场景
-go run ./fault_a
-go run ./fault_b
-go run ./fault_c
-go run ./fault_d
+go run ./exp6/fault_a
+go run ./exp6/fault_b
+go run ./exp6/fault_c
+go run ./exp6/fault_d
 ```
 
 ---
@@ -47,7 +47,18 @@ go run ./fault_d
 | 故障A | `fault_a/` | 参与者拒票 | 数据库B投 NO -> 全局 ABORT |
 | 故障B | `fault_b/` | 参与者超时 | 数据库B无响应 -> 超时回滚 |
 | 故障C | `fault_c/` | 协调者投票前崩溃 | 协调者 DOWN -> 参与者超时自回滚 |
-| 故障D | `fault_d/` | 协调者决议后崩溃 | 写入 COMMIT 后崩溃 -> 恢复重放 |
+| 故障D | `fault_d/` | 协调者决议后崩溃 | 写入COMMIT到日志 -> 崩溃 -> 参与者阻塞 -> 重启读日志 -> 重放COMMIT |
+
+### 故障D：日志恢复重放（重点场景）
+
+故障D 展示了 2PC 中最关键的恢复机制：
+
+1. 协调者将 COMMIT 决议**写入日志文件** `coordinator.log`
+2. 协调者崩溃，**所有参与者阻塞等待**决议
+3. 协调者重启，**读取日志文件**恢复决议
+4. 协调者**重放 GLOBAL-COMMIT**，所有参与者提交完成
+
+这保证了即使协调者在广播前崩溃，事务最终仍能一致性完成。
 
 ---
 
@@ -67,14 +78,26 @@ go run ./fault_d
 - 一票否决：任一参与者拒绝则全局回滚
 - 阻塞问题：协调者必须等待所有参与者响应，超时机制的重要性
 - 协调者单点故障：投票前崩溃导致参与者超时自回滚
-- 决议持久化与恢复重放：写入 COMMIT 后崩溃，恢复后重放保证最终一致性
+- **决议持久化与日志恢复**：写入日志文件后崩溃，重启读取日志重放，保证最终一致性
 - 多协程并发：协调者与参与者通过 goroutine + channel 交互
 
 ---
 
-## 输出格式
+## 代码结构
 
-运行后，控制台逐步展示：
+每个场景文件的代码组织：
+
+```
+1. main()              -- 程序入口，场景配置与流程编排
+2. 2PC 协议核心逻辑     -- runCoordinator / runWorker / broadcastDecision
+3. 通信类型定义         -- voteRequest / voteResponse / decisionMsg
+4. 集群状态管理         -- clusterState / actorView / step
+5. 渲染与显示           -- renderStep / renderLayout / makeBox / 中文宽度处理
+```
+
+---
+
+## 输出格式
 
 ```
 ============================================================
