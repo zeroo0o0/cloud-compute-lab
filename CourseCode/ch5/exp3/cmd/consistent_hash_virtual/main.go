@@ -201,8 +201,8 @@ func resetImagesDir(dir string) error {
 
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
-	initialNodes := readInt(scanner, "请输入初始真实节点数量（默认 4）：", 4, 1)
-	replicas := readInt(scanner, "请输入每个真实节点的虚拟节点数量（默认 20）：", 20, 1)
+	initialNodes := readInt(scanner, "请输入初始真实节点数量（默认 3）：", 3, 1)
+	replicas := readInt(scanner, "请输入每个真实节点的虚拟节点数量（默认 50）：", 50, 1)
 	players := readInt(scanner, "请输入玩家数量（默认 100000）：", 100000, 1)
 	newNode := fmt.Sprintf("Node-%d", initialNodes)
 	imagesDir := filepath.Join("images", "virtual")

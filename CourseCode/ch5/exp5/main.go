@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,7 +15,6 @@ const (
 	serverCount  = 100
 	fanout       = 2
 	rounds       = 12
-	tickInterval = 1 * time.Second
 	summaryDelay = 50 * time.Millisecond
 )
 
@@ -29,6 +30,7 @@ type BossEvent struct {
 type Server struct {
 	ID           int
 	inbox        chan BossEvent
+	roundCh      chan int
 	knownAtRound atomic.Int32
 	hasBoss      atomic.Bool
 }
@@ -44,8 +46,9 @@ func main() {
 	servers := make([]*Server, 0, serverCount)
 	for i := 0; i < serverCount; i++ {
 		s := &Server{
-			ID:    i,
-			inbox: make(chan BossEvent, 16),
+			ID:      i,
+			inbox:   make(chan BossEvent, 16),
+			roundCh: make(chan int),
 		}
 		s.knownAtRound.Store(-1)
 		servers = append(servers, s)
@@ -61,18 +64,19 @@ func main() {
 		}(s)
 	}
 
-	fmt.Printf("启动 %d 台服务器，fanout=%d，每轮间隔=%s\n", serverCount, fanout, tickInterval)
+	fmt.Printf("启动 %d 台服务器，fanout=%d", serverCount, fanout)
 	fmt.Println("向 Server-000 注入 HasBoss=true，观察消息如何去中心化扩散。")
 
 	// 从 1 台服务器开始注入 Boss 状态，后续传播完全依赖各服务器自己 gossip。
 	servers[0].discover(0, -1)
 
-	// 主 goroutine 每隔一个 tickInterval 打印一次全网同步进度。
-	ticker := time.NewTicker(tickInterval)
-	defer ticker.Stop()
+	reader := bufio.NewReader(os.Stdin)
+	waitForEnter(reader, "按回车开始第 01 轮 gossip...")
 
 	for round := 1; round <= rounds; round++ {
-		<-ticker.C
+		for _, s := range servers {
+			s.roundCh <- round
+		}
 		// 稍等一下，让这一轮服务器之间的 gossip 日志先打印出来，再输出汇总。
 		time.Sleep(summaryDelay)
 
@@ -81,6 +85,9 @@ func main() {
 		if known == serverCount {
 			fmt.Printf("全部服务器已同步 Boss 状态，总轮数=%d，接近 O(log N) 的传播效果。\n", round)
 			break
+		}
+		if round < rounds {
+			waitForEnter(reader, fmt.Sprintf("按回车继续第 %02d 轮 gossip...", round+1))
 		}
 	}
 
@@ -94,24 +101,24 @@ func main() {
 
 // run 持续处理外部通知；只要自己已经知道 Boss 存在，就会定期随机挑选 fanout 个邻居传播。
 func (s *Server) run(ctx context.Context, all []*Server) {
-	ticker := time.NewTicker(tickInterval)
-	defer ticker.Stop()
-
-	currentRound := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case event := <-s.inbox:
 			s.discover(event.Round, event.SourceID)
-		case <-ticker.C:
-			currentRound++
+		case currentRound := <-s.roundCh:
 			// 本轮刚发现 Boss 的服务器，从下一轮开始继续传播，避免一轮内连锁转发导致轮次含义变乱。
 			if s.hasBoss.Load() && int(s.knownAtRound.Load()) < currentRound {
 				s.gossip(all, currentRound)
 			}
 		}
 	}
+}
+
+func waitForEnter(reader *bufio.Reader, prompt string) {
+	fmt.Print(prompt)
+	_, _ = reader.ReadString('\n')
 }
 
 // discover 把服务器从“未知”切换到“已发现 Boss”。
