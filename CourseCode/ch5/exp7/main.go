@@ -73,6 +73,68 @@ type candidateEvent struct {
 	Term int
 }
 
+type renderEvent struct {
+	Title string
+	Note  string
+}
+
+type renderState struct {
+	mu    sync.Mutex
+	title string
+	note  string
+}
+
+func (r *renderState) Update(title, note string) {
+	r.mu.Lock()
+	r.title = title
+	r.note = note
+	r.mu.Unlock()
+}
+
+func (r *renderState) Snapshot() (string, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.title, r.note
+}
+
+type stats struct {
+	mu           sync.Mutex
+	requestVotes int
+	votesGranted int
+	votesDenied  int
+	heartbeats   int
+}
+
+func (s *stats) incRequestVote() {
+	s.mu.Lock()
+	s.requestVotes++
+	s.mu.Unlock()
+}
+
+func (s *stats) incVoteGranted() {
+	s.mu.Lock()
+	s.votesGranted++
+	s.mu.Unlock()
+}
+
+func (s *stats) incVoteDenied() {
+	s.mu.Lock()
+	s.votesDenied++
+	s.mu.Unlock()
+}
+
+func (s *stats) incHeartbeat() {
+	s.mu.Lock()
+	s.heartbeats++
+	s.mu.Unlock()
+}
+
+func (s *stats) snapshot() (int, int, int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requestVotes, s.votesGranted, s.votesDenied, s.heartbeats
+}
+
 // ── 配置 ─────────────────────────────────────────────────────────────────────
 
 type config struct {
@@ -127,6 +189,9 @@ func main() {
 	// 用于通知主函数"新 Leader 已当选"
 	leaderCh := make(chan int, 8)
 	candidateCh := make(chan candidateEvent, 8)
+	eventCh := make(chan renderEvent, 32)
+	state := &renderState{}
+	stats := &stats{}
 
 	// ── 第三步：启动所有节点 ──────────────────────────────────────────────────
 	// 每个节点在独立的 goroutine 中运行，模拟分布式环境中的并发行为
@@ -137,20 +202,25 @@ func main() {
 		nodes[i].ElectionTimeout = initialTimeout
 		nodes[i].TimeoutLeft = initialTimeout
 		nodes[i].mu.Unlock()
-		go runNode(nodes[i], nodes, cfg, rng, leaderCh, candidateCh, initialTimeout)
+		go runNode(nodes[i], nodes, cfg, rng, leaderCh, candidateCh, eventCh, stats, initialTimeout)
 	}
 
-	renderCluster("集群启动", "3 个节点已启动，全部为 Follower", nodes)
-	waitForEnter("按 Enter 继续，观察随机选举倒计时...")
+	state.Update("集群启动", "3 个节点已启动，全部为 Follower")
+	stopRender := make(chan struct{})
+	go renderLoop(stopRender, state, nodes, stats, 1*time.Second)
+	go consumeEvents(state, eventCh)
+
+	state.Update("集群启动", "3 个节点已启动，全部为 Follower（按 Enter 继续，观察随机选举倒计时）")
+	waitForEnter("")
 	if ev, ok := waitForCandidate(candidateCh, 2*time.Second); ok {
-		renderCluster("Candidate 发起选举", fmt.Sprintf("Node-%d 转为 Candidate（Term=%d）", ev.ID, ev.Term), nodes)
-		waitForEnter("按 Enter 继续，等待首任 Leader 当选...")
+		state.Update("Candidate 发起选举", fmt.Sprintf("Node-%d 转为 Candidate（Term=%d，按 Enter 继续）", ev.ID, ev.Term))
+		waitForEnter("")
 	}
 
 	// ── 第四步：等待首任 Leader 当选 ──────────────────────────────────────────
 	initialLeader := <-leaderCh
-	renderCluster("首任 Leader 当选", fmt.Sprintf("Node-%d 当选为首任 Leader", initialLeader), nodes)
-	waitForEnter("按 Enter 继续，准备模拟 Leader 宕机...")
+	state.Update("首任 Leader 当选", fmt.Sprintf("Node-%d 当选为首任 Leader（按 Enter 继续）", initialLeader))
+	waitForEnter("")
 
 	// ── 第五步：模拟 Leader 宕机 ──────────────────────────────────────────────
 	time.Sleep(cfg.KillLeaderAfter)
@@ -159,11 +229,11 @@ func main() {
 	nodes[initialLeader].Role = roleFollower
 	nodes[initialLeader].mu.Unlock()
 	close(nodes[initialLeader].done)
-	renderCluster("Leader 宕机", fmt.Sprintf("Leader Node-%d 已崩溃", initialLeader), nodes)
-	waitForEnter("按 Enter 继续，观察新一轮随机倒计时...")
+	state.Update("Leader 宕机", fmt.Sprintf("Leader Node-%d 已崩溃（按 Enter 继续，观察新一轮随机倒计时）", initialLeader))
+	waitForEnter("")
 	if ev, ok := waitForCandidate(candidateCh, 2*time.Second); ok {
-		renderCluster("Candidate 发起选举", fmt.Sprintf("Node-%d 转为 Candidate（Term=%d）", ev.ID, ev.Term), nodes)
-		waitForEnter("按 Enter 继续，等待新 Leader 当选...")
+		state.Update("Candidate 发起选举", fmt.Sprintf("Node-%d 转为 Candidate（Term=%d，按 Enter 继续）", ev.ID, ev.Term))
+		waitForEnter("")
 	}
 
 	// ── 第六步：等待新 Leader 当选（故障转移） ────────────────────────────────
@@ -173,15 +243,17 @@ func main() {
 		return
 	}
 	finalTerm := getNodeTerm(nodes[newLeader])
-	renderCluster("故障转移完成", fmt.Sprintf("Node-%d 当选为新 Leader（Term=%d）", newLeader, finalTerm), nodes)
-	waitForEnter("按 Enter 结束演示...")
+	state.Update("故障转移完成", fmt.Sprintf("Node-%d 当选为新 Leader（Term=%d，按 Enter 结束）", newLeader, finalTerm))
+	waitForEnter("")
+	close(stopRender)
+	close(eventCh)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 节点运行函数：每个节点在此函数中独立运行
 // 核心逻辑：定时器驱动 + 消息处理（Select 多路复用）
 // ═══════════════════════════════════════════════════════════════════════════════
-func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh chan int, candidateCh chan candidateEvent, initialTimeout time.Duration) {
+func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh chan int, candidateCh chan candidateEvent, eventCh chan renderEvent, stats *stats, initialTimeout time.Duration) {
 	// 使用预先生成的随机超时作为初始倒计时
 	electionTimeout := initialTimeout
 	setTimeout(n, electionTimeout)
@@ -209,7 +281,7 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 		// ── Leader 定期发送心跳 ─────────────────────────────────────────
 		case <-heartbeatTimer.C:
 			if n.Role == roleLeader {
-				sendHeartbeats(n, allNodes)
+				sendHeartbeats(n, allNodes, stats)
 			}
 
 		// ── Follower/Candidate 选举超时检测 ────────────────────────────
@@ -234,6 +306,7 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 			case candidateCh <- candidateEvent{ID: n.ID, Term: term}:
 			default:
 			}
+			emitEvent(eventCh, "Candidate 发起选举", fmt.Sprintf("Node-%d 进入 Candidate，开始拉票（Term=%d）", n.ID, term))
 			electionTimeout = randomElectionTimeout(rng, cfg.MinElectionTimeout, cfg.MaxElectionTimeout)
 			setTimeout(n, electionTimeout)
 
@@ -243,7 +316,7 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 				if peer == nil || peer.ID == n.ID || !getNodeAlive(peer) {
 					continue
 				}
-				if sendRequestVote(n, peer) {
+				if sendRequestVote(n, peer, stats, eventCh) {
 					votes++
 				}
 			}
@@ -256,6 +329,7 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 				n.TimeoutLeft = 0
 				n.ElectionTimeout = 0
 				n.mu.Unlock()
+				emitEvent(eventCh, "Leader 当选", fmt.Sprintf("Node-%d 获得多数票，成为 Leader（Term=%d）", n.ID, n.Term))
 				// 通知主函数：新 Leader 已当选
 				select {
 				case leaderCh <- n.ID:
@@ -324,7 +398,7 @@ func handleAppendEntries(n *node, msg AppendEntriesMsg, cfg config, rng *rand.Ra
 }
 
 // sendRequestVote: 向指定节点发送投票请求（模拟 RequestVote RPC）
-func sendRequestVote(candidate *node, peer *node) bool {
+func sendRequestVote(candidate *node, peer *node, stats *stats, eventCh chan renderEvent) bool {
 	if peer == nil {
 		return false
 	}
@@ -332,22 +406,33 @@ func sendRequestVote(candidate *node, peer *node) bool {
 	if !getNodeAlive(peer) || peerTerm > candidate.Term {
 		return false
 	}
+	stats.incRequestVote()
+	emitEvent(eventCh, "RequestVote", fmt.Sprintf("Node-%d -> Node-%d 请求投票", candidate.ID, peer.ID))
 	respCh := make(chan bool, 1)
 	peer.requestVoteCh <- RequestVoteMsg{
 		Term:        candidate.Term,
 		CandidateID: candidate.ID,
 		RespCh:      respCh,
 	}
-	return <-respCh
+	voteGranted := <-respCh
+	if voteGranted {
+		stats.incVoteGranted()
+		emitEvent(eventCh, "RequestVote", fmt.Sprintf("Node-%d 返回 YES 给 Node-%d", peer.ID, candidate.ID))
+		return true
+	}
+	stats.incVoteDenied()
+	emitEvent(eventCh, "RequestVote", fmt.Sprintf("Node-%d 返回 NO 给 Node-%d", peer.ID, candidate.ID))
+	return false
 }
 
 // sendHeartbeats: Leader 向所有节点发送心跳（模拟 AppendEntries RPC）
 // 心跳是 Leader 维持权力的关键：定期告诉其他节点"我还活着"
-func sendHeartbeats(leader *node, allNodes []*node) {
+func sendHeartbeats(leader *node, allNodes []*node, stats *stats) {
 	for _, peer := range allNodes {
 		if peer == nil || peer.ID == leader.ID || !getNodeAlive(peer) {
 			continue
 		}
+		stats.incHeartbeat()
 		respCh := make(chan bool, 1)
 		peer.appendEntriesCh <- AppendEntriesMsg{
 			Term:    leader.Term,
@@ -426,13 +511,41 @@ func waitForNewLeader(leaderCh chan int, exclude int, timeout time.Duration) (in
 	}
 }
 
-func waitForEnter(prompt string) {
-	fmt.Println(prompt)
+func waitForEnter(_ string) {
 	reader := bufio.NewReader(os.Stdin)
 	_, _ = reader.ReadString('\n')
 }
 
-func renderCluster(title, note string, nodes []*node) {
+func emitEvent(eventCh chan renderEvent, title, note string) {
+	select {
+	case eventCh <- renderEvent{Title: title, Note: note}:
+	default:
+	}
+}
+
+func consumeEvents(state *renderState, eventCh chan renderEvent) {
+	for ev := range eventCh {
+		state.Update(ev.Title, ev.Note)
+	}
+}
+
+func renderLoop(stop <-chan struct{}, state *renderState, nodes []*node, stats *stats, refresh time.Duration) {
+	ticker := time.NewTicker(refresh)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			renderCluster(state, nodes, stats)
+		case <-stop:
+			renderCluster(state, nodes, stats)
+			return
+		}
+	}
+}
+
+func renderCluster(state *renderState, nodes []*node, stats *stats) {
+	title, note := state.Snapshot()
+	clearScreen()
 	snapshots := snapshotNodes(nodes)
 	fmt.Println("============================================================")
 	fmt.Println(title)
@@ -453,7 +566,13 @@ func renderCluster(title, note string, nodes []*node) {
 		}
 		fmt.Println(strings.Join(lineParts, "  "))
 	}
+	requestVotes, votesGranted, votesDenied, heartbeats := stats.snapshot()
+	fmt.Printf("\n统计: RequestVote=%d, VoteYes=%d, VoteNo=%d, Heartbeat=%d\n", requestVotes, votesGranted, votesDenied, heartbeats)
 	fmt.Println()
+}
+
+func clearScreen() {
+	fmt.Print("\x1b[H\x1b[2J")
 }
 
 func snapshotNodes(nodes []*node) []nodeSnapshot {

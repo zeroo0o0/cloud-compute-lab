@@ -37,3 +37,5 @@ go run ./exp7 -seed 7 -kill-after-ms 450
 - Leader 定期心跳维持领导权
 - Leader 故障后，其余节点自动选举新 Leader
 - 演示过程中按 Enter 逐步推进，观察节点状态变化
+- 控制台实时刷新随机倒计时，并统计 RequestVote / 心跳数量
+- Candidate 拉票过程在事件说明中动态展示
