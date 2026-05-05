@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"ch5/internal/exp6_2pc"
+	"ch5/exp6/exp6_2pc"
 )
 
 func main() {

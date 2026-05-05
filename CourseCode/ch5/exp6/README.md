@@ -6,25 +6,25 @@
 
 ## 入口与代码分层
 
-- 启动入口：`cmd/exp6/two_phase_commit/main.go`
+- 启动入口：`exp6/main.go`
   - 解析参数：`scenario`、`step-ms`、`data-dir`
 
-- 对外 API：`internal/exp6_2pc/api.go`
+- 对外 API：`exp6/exp6_2pc/api.go`
   - 对外暴露：`RunScenario`、`SetVisualStepDelay`、场景常量与状态常量
 
-- 核心协议：`internal/exp6_2pc/core/engine.go`
+- 核心协议：`exp6/exp6_2pc/core/engine.go`
   - 2PC 状态机：`INIT`、`WAIT`、`READY`、`COMMIT`、`ABORT`
   - Coordinator / Worker 模型
   - 稳定存储日志写入与恢复读取
 
-- 场景编排：`internal/exp6_2pc/scenario/`
+- 场景编排：`exp6/exp6_2pc/scenario/`
   - `core_shared.go`：场景核心复用（统一 `runCore`、故障注入、步骤快照）
   - `scenarios.go`：`normal/a/b/c/d` 场景配置与剧情渲染
 
-- 渲染工具：`internal/exp6_2pc/utils/renderer.go`
+- 渲染工具：`exp6/exp6_2pc/utils/renderer.go`
   - 电影式对白与输出节奏控制
 
-- 测试：`internal/exp6_2pc/demo_test.go`
+- 测试：`exp6/exp6_2pc/demo_test.go`
   - `TestScenarioNormalCommit`
   - `TestScenarioDRecoveryReplaysCommit`
 
@@ -35,8 +35,8 @@
 在 `CourseCode/ch5` 目录执行：
 
 ```powershell
-go run ./cmd/exp6/two_phase_commit -scenario all -step-ms 900
-go run ./cmd/exp6/two_phase_commit -scenario normal -step-ms 900
+go run ./exp6 -scenario all -step-ms 900
+go run ./exp6 -scenario normal -step-ms 900
 ```
 
 参数说明：

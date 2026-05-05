@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"ch5/internal/exp6_2pc/core"
-	"ch5/internal/exp6_2pc/utils"
+	"ch5/exp6/exp6_2pc/core"
+	"ch5/exp6/exp6_2pc/utils"
 )
 
 // RunScenario 是场景层统一入口：根据场景编号路由到对应的“核心执行 + 动态渲染”。
