@@ -1,132 +1,100 @@
-# 实验六：2PC 可视化流程演示（简化版）# 实验六：分布式事务 Two-Phase Commit（2PC）演示说明
+# 实验六：2PC 可视化流程演示
 
+本目录对应第 5 章实验六，通过 **1 个协调者 + 3 个参与者** 的结构化可视化，演示 Two-Phase Commit（2PC）协议的状态机与故障处理。采用 **按 Enter 逐步推进** 的方式展示状态变化与事件播报。
 
-
-本目录提供更易理解的 2PC 演示：**1 个协调者 + 3 个参与者** 的结构化可视化，并通过 **按 Enter 逐步推进** 的方式展示状态变化与事件。本目录对应第 5 章实验六，聚焦 2PC 的状态机、故障注入、稳定存储与恢复重放。
-
-
-
-> 进阶版演示（包含完整日志与剧情渲染）已保留在 `exp6_bonus/`。---
-
-
-
----## 入口与代码分层
-
-
-
-## 结构说明- 启动入口：`exp6/main.go`
-
-  - 解析参数：`scenario`、`step-ms`、`data-dir`
-
-- 上方：协调者服务（Service / Coordinator）
-
-- 下方：三个数据库参与者（Worker）- 对外 API：`exp6/exp6_2pc/api.go`
-
-- 每一步展示：当前状态 + 事件播报  - 对外暴露：`RunScenario`、`SetVisualStepDelay`、场景常量与状态常量
-
-
-
----- 核心协议：`exp6/exp6_2pc/core/engine.go`
-
-  - 2PC 状态机：`INIT`、`WAIT`、`READY`、`COMMIT`、`ABORT`
-
-## 启动方式  - Coordinator / Worker 模型
-
-  - 稳定存储日志写入与恢复读取
-
-在 `CourseCode/ch5` 目录执行：
-
-- 场景编排：`exp6/exp6_2pc/scenario/`
-
-```powershell  - `core_shared.go`：场景核心复用（统一 `runCore`、故障注入、步骤快照）
-
-go run ./exp6 -scenario all  - `scenarios.go`：`normal/a/b/c/d` 场景配置与剧情渲染
-
-```
-
-- 渲染工具：`exp6/exp6_2pc/utils/renderer.go`
-
-参数说明：  - 电影式对白与输出节奏控制
-
-
-
-- `-scenario all`：依次播放正常 + 故障 A/B/C/D- 测试：`exp6/exp6_2pc/demo_test.go`
-
-- `-scenario normal|a|b|c|d`：单场景演示  - `TestScenarioNormalCommit`
-
-  - `TestScenarioDRecoveryReplaysCommit`
+> 进阶版演示（包含完整日志与剧情渲染）已保留在 `exp6_bonus/`。
 
 ---
+
+## 目录结构
+
+```
+exp6/
+├── normal/main.go      # 正常流程：2PC 成功提交
+├── fault_a/main.go     # 故障A：参与者拒票（一票否决）
+├── fault_b/main.go     # 故障B：参与者超时无响应
+├── fault_c/main.go     # 故障C：协调者第一阶段崩溃
+├── fault_d/main.go     # 故障D：协调者决议写入后崩溃
+└── README.md
+```
+
+每个场景都是**独立可执行程序**，包含完整的 2PC 核心代码、多协程实现和渲染引擎。
+
+---
+
+## 启动方式
+
+在 `CourseCode/ch5/exp6` 目录下执行：
+
+```powershell
+# 正常流程
+go run ./normal
+
+# 故障场景
+go run ./fault_a
+go run ./fault_b
+go run ./fault_c
+go run ./fault_d
+```
 
 ---
 
 ## 场景说明
 
-## 启动方式
-
-- `normal`：正常提交
-
-- `a`：参与者拒票 → 全局回滚在 `CourseCode/ch5` 目录执行：
-
-- `b`：参与者超时 → 全局回滚
-
-- `c`：协调者在 Phase-1 崩溃 → 参与者超时回滚```powershell
-
-- `d`：协调者写入决议后崩溃 → 恢复重放提交go run ./exp6 -scenario all -step-ms 900
-
-go run ./exp6 -scenario normal -step-ms 900
-```
-
-参数说明：
-
-- `-scenario all`：分阶段演示（`normal -> Enter -> a -> Enter -> b -> Enter -> c -> Enter -> d`）
-- `-scenario normal|a|b|c|d`：单场景演示
-- `-step-ms`：对白推进间隔；`0` 表示快速输出
-- `-data-dir`：稳定存储日志目录（默认 `./data/exp6_2pc`）
+| 场景 | 文件 | 故障模型 | 预期行为 |
+|------|------|----------|----------|
+| 正常流程 | `normal/` | 无故障 | 全部 YES -> COMMIT |
+| 故障A | `fault_a/` | 参与者拒票 | 数据库B投 NO -> 全局 ABORT |
+| 故障B | `fault_b/` | 参与者超时 | 数据库B无响应 -> 超时回滚 |
+| 故障C | `fault_c/` | 协调者投票前崩溃 | 协调者 DOWN -> 参与者超时自回滚 |
+| 故障D | `fault_d/` | 协调者决议后崩溃 | 写入 COMMIT 后崩溃 -> 恢复重放 |
 
 ---
 
-## 场景映射
+## 场景映射（教材页码）
 
 - `normal`：正常流程（P67）
-- `a`：Worker 拒票（P68）
-- `b`：Worker 超时/无响应（P70）
-- `c`：Coordinator 第一阶段崩溃（P72）
-- `d`：Coordinator 第二阶段崩溃后恢复重放（P73）
+- `fault_a`：Worker 拒票（P68）
+- `fault_b`：Worker 超时/无响应（P70）
+- `fault_c`：Coordinator 第一阶段崩溃（P72）
+- `fault_d`：Coordinator 第二阶段崩溃后恢复重放（P73）
 
 ---
 
 ## 实验要点
 
-- 严格的有限状态机迁移
-- 关键迁移前后稳定存储日志（`STATE_BEFORE/STATE_AFTER`）
-- 故障注入覆盖拒票、超时、协调者崩溃
-- D 场景通过日志恢复并重放全局决议，验证最终一致性
+- 2PC 两阶段提交的基本流程（Phase-1 投票 + Phase-2 决议）
+- 一票否决：任一参与者拒绝则全局回滚
+- 阻塞问题：协调者必须等待所有参与者响应，超时机制的重要性
+- 协调者单点故障：投票前崩溃导致参与者超时自回滚
+- 决议持久化与恢复重放：写入 COMMIT 后崩溃，恢复后重放保证最终一致性
+- 多协程并发：协调者与参与者通过 goroutine + channel 交互
 
 ---
 
-## 日志与恢复观察
+## 输出格式
 
-运行后会生成：
+运行后，控制台逐步展示：
 
-- `./data/exp6_2pc/<scenario>/coordinator.log`
-- `./data/exp6_2pc/<scenario>/worker_a.log`
-- `./data/exp6_2pc/<scenario>/worker_b.log`
+```
+============================================================
+场景：正常流程：2PC 成功提交
+...
+------------------------------------------------------------
+正常流程：2PC 成功提交 | 步骤 1/5
+事件：初始化：所有参与者处于 INIT，等待协调者发起投票。
 
-在场景 `d` 中可观察：
++--------------------------------+
+| 协调者                          |
+| Role: Service                  |
+| State: INIT                    |
+| Note: 准备发起投票               |
++--------------------------------+
 
-1. Coordinator 已写入 `DECISION=COMMIT` 后崩溃。
-2. Worker 卡在 `READY` 等待决议。
-3. Coordinator 恢复后读取日志并重放 `GLOBAL-COMMIT`，事务闭环。
-
----
-
-## 故事化设定（教学叙事）
-
-本实验采用“教授的完美协同实验”作为课堂叙事外壳，用以帮助理解 2PC 的原子提交语义：
-
-- 先投票，再统一决议
-- 要么全体提交，要么全体回滚
-- 不允许局部推进
-
-说明：故事为纯教学类比，不对应现实行为，不涉及暴力或违法实践。
++------------------------+  +------------------------+  +------------------------+
+| 数据库A                |  | 数据库B                |  | 数据库C                |
+| Role: Worker           |  | Role: Worker           |  | Role: Worker           |
+| State: INIT            |  | State: INIT            |  | State: INIT            |
+| Note: 待命              |  | Note: 待命              |  | Note: 待命              |
++------------------------+  +------------------------+  +------------------------+
+```
