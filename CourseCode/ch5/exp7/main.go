@@ -50,7 +50,6 @@ type node struct {
 	Alive    bool // 节点是否存活
 
 	ElectionTimeout time.Duration // 当前随机选举超时
-	TimeoutLeft     time.Duration // 剩余倒计时（Follower/Candidate 使用）
 
 	// 消息通道：模拟网络通信
 	requestVoteCh   chan RequestVoteMsg   // 接收 RequestVote RPC
@@ -65,7 +64,6 @@ type nodeSnapshot struct {
 	VotedFor int
 	Alive    bool
 	Timeout  time.Duration
-	Left     time.Duration
 }
 
 type candidateEvent struct {
@@ -200,26 +198,25 @@ func main() {
 		initialTimeout := randomElectionTimeout(rng, cfg.MinElectionTimeout, cfg.MaxElectionTimeout)
 		nodes[i].mu.Lock()
 		nodes[i].ElectionTimeout = initialTimeout
-		nodes[i].TimeoutLeft = initialTimeout
 		nodes[i].mu.Unlock()
 		go runNode(nodes[i], nodes, cfg, rng, leaderCh, candidateCh, eventCh, stats, initialTimeout)
 	}
 
-	state.Update("集群启动", "3 个节点已启动，全部为 Follower")
-	stopRender := make(chan struct{})
-	go renderLoop(stopRender, state, nodes, stats, 1*time.Second)
 	go consumeEvents(state, eventCh)
 
-	state.Update("集群启动", "3 个节点已启动，全部为 Follower（按 Enter 继续，观察随机选举倒计时）")
+	state.Update("集群启动", "3 个节点已启动，全部为 Follower（按 Enter 继续）")
+	renderCluster(state, nodes, stats)
 	waitForEnter("")
 	if ev, ok := waitForCandidate(candidateCh, 2*time.Second); ok {
 		state.Update("Candidate 发起选举", fmt.Sprintf("Node-%d 转为 Candidate（Term=%d，按 Enter 继续）", ev.ID, ev.Term))
+		renderCluster(state, nodes, stats)
 		waitForEnter("")
 	}
 
 	// ── 第四步：等待首任 Leader 当选 ──────────────────────────────────────────
 	initialLeader := <-leaderCh
 	state.Update("首任 Leader 当选", fmt.Sprintf("Node-%d 当选为首任 Leader（按 Enter 继续）", initialLeader))
+	renderCluster(state, nodes, stats)
 	waitForEnter("")
 
 	// ── 第五步：模拟 Leader 宕机 ──────────────────────────────────────────────
@@ -229,10 +226,12 @@ func main() {
 	nodes[initialLeader].Role = roleFollower
 	nodes[initialLeader].mu.Unlock()
 	close(nodes[initialLeader].done)
-	state.Update("Leader 宕机", fmt.Sprintf("Leader Node-%d 已崩溃（按 Enter 继续，观察新一轮随机倒计时）", initialLeader))
+	state.Update("Leader 宕机", fmt.Sprintf("Leader Node-%d 已崩溃（按 Enter 继续）", initialLeader))
+	renderCluster(state, nodes, stats)
 	waitForEnter("")
 	if ev, ok := waitForCandidate(candidateCh, 2*time.Second); ok {
 		state.Update("Candidate 发起选举", fmt.Sprintf("Node-%d 转为 Candidate（Term=%d，按 Enter 继续）", ev.ID, ev.Term))
+		renderCluster(state, nodes, stats)
 		waitForEnter("")
 	}
 
@@ -244,8 +243,8 @@ func main() {
 	}
 	finalTerm := getNodeTerm(nodes[newLeader])
 	state.Update("故障转移完成", fmt.Sprintf("Node-%d 当选为新 Leader（Term=%d，按 Enter 结束）", newLeader, finalTerm))
+	renderCluster(state, nodes, stats)
 	waitForEnter("")
-	close(stopRender)
 	close(eventCh)
 }
 
@@ -290,7 +289,6 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 				continue
 			}
 			electionTimeout -= cfg.Tick
-			setTimeoutLeft(n, electionTimeout)
 			if electionTimeout > 0 {
 				continue
 			}
@@ -326,7 +324,6 @@ func runNode(n *node, allNodes []*node, cfg config, rng *rand.Rand, leaderCh cha
 			if votes > aliveCount/2 {
 				n.mu.Lock()
 				n.Role = roleLeader
-				n.TimeoutLeft = 0
 				n.ElectionTimeout = 0
 				n.mu.Unlock()
 				emitEvent(eventCh, "Leader 当选", fmt.Sprintf("Node-%d 获得多数票，成为 Leader（Term=%d）", n.ID, n.Term))
@@ -487,13 +484,6 @@ func waitForCandidate(candidateCh chan candidateEvent, timeout time.Duration) (c
 func setTimeout(n *node, timeout time.Duration) {
 	n.mu.Lock()
 	n.ElectionTimeout = timeout
-	n.TimeoutLeft = timeout
-	n.mu.Unlock()
-}
-
-func setTimeoutLeft(n *node, left time.Duration) {
-	n.mu.Lock()
-	n.TimeoutLeft = left
 	n.mu.Unlock()
 }
 
@@ -529,23 +519,8 @@ func consumeEvents(state *renderState, eventCh chan renderEvent) {
 	}
 }
 
-func renderLoop(stop <-chan struct{}, state *renderState, nodes []*node, stats *stats, refresh time.Duration) {
-	ticker := time.NewTicker(refresh)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			renderCluster(state, nodes, stats)
-		case <-stop:
-			renderCluster(state, nodes, stats)
-			return
-		}
-	}
-}
-
 func renderCluster(state *renderState, nodes []*node, stats *stats) {
 	title, note := state.Snapshot()
-	clearScreen()
 	snapshots := snapshotNodes(nodes)
 	fmt.Println("============================================================")
 	fmt.Println(title)
@@ -571,10 +546,6 @@ func renderCluster(state *renderState, nodes []*node, stats *stats) {
 	fmt.Println()
 }
 
-func clearScreen() {
-	fmt.Print("\x1b[H\x1b[2J")
-}
-
 func snapshotNodes(nodes []*node) []nodeSnapshot {
 	snapshots := make([]nodeSnapshot, 0, len(nodes))
 	for _, n := range nodes {
@@ -589,7 +560,6 @@ func snapshotNodes(nodes []*node) []nodeSnapshot {
 			VotedFor: n.VotedFor,
 			Alive:    n.Alive,
 			Timeout:  n.ElectionTimeout,
-			Left:     n.TimeoutLeft,
 		})
 		n.mu.Unlock()
 	}
@@ -608,7 +578,6 @@ func makeNodeBox(s nodeSnapshot, width int) []string {
 		fmt.Sprintf("Term: %d", s.Term),
 		fmt.Sprintf("Vote: %s", vote),
 		fmt.Sprintf("TO: %s", formatTimeout(s.Timeout)),
-		fmt.Sprintf("Left: %s", formatTimeout(s.Left)),
 		fmt.Sprintf("Note: %s", nodeNote(s)),
 	}
 	for i, line := range lines {
