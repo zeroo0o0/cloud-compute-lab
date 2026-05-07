@@ -11,18 +11,34 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	mode              = "Wave-Based"
-	defaultTargetAddr = "127.0.0.1:9103"
+	mode                     = "Wave-Based"
+	defaultTargetAddr        = "127.0.0.1:9103"
+	defaultClientAddr        = "127.0.0.1:9203"
+	defaultServerBClientAddr = "127.0.0.1:9303"
 )
+
+type playerState struct {
+	mu         sync.Mutex
+	frozen     bool
+	migrated   bool
+	downtimeMs float64
+	resume     chan struct{}
+}
 
 func main() {
 	targetAddr := getenv("TARGET_ADDR", defaultTargetAddr)
+	clientAddr := getenv("CLIENT_ADDR", defaultClientAddr)
+	serverBClientAddr := getenv("SERVER_B_CLIENT_ADDR", defaultServerBClientAddr)
+	state := &playerState{resume: make(chan struct{})}
 
-	fmt.Printf("[Server-A][%s] 已启动，目标 Server-B=%s\n", mode, targetAddr)
+	go serveClientRequests(clientAddr, serverBClientAddr, state)
+
+	fmt.Printf("[Server-A][%s] 已启动，目标 Server-B=%s，客户端监听=%s\n", mode, targetAddr, clientAddr)
 	fmt.Println("按 Enter 开始迁移，输入 q 退出")
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -34,8 +50,12 @@ func main() {
 
 		switch strings.TrimSpace(strings.ToLower(scanner.Text())) {
 		case "", "migrate":
-			runMigration(targetAddr)
-			return
+			runMigration(targetAddr, state)
+			if state.isMigrated() {
+				fmt.Println("迁移完成，Server-A 等待 2s 以便 Client 收到重定向，然后自动退出")
+				time.Sleep(2 * time.Second)
+				return
+			}
 		case "q", "quit", "exit":
 			fmt.Println("退出 Server-A")
 			return
@@ -45,7 +65,7 @@ func main() {
 	}
 }
 
-func runMigration(targetAddr string) {
+func runMigration(targetAddr string, state *playerState) {
 	// Wave-Based 对比重点：
 	// 先后台传非关键状态；停机时只传玩家恢复所必需的关键状态；
 	// 玩家恢复后，再后台补齐剩余状态。因此停机期传输量最小，玩家感知停机时间也最短。
@@ -63,21 +83,23 @@ func runMigration(targetAddr string) {
 	fmt.Printf("[Server-A][%s] 玩家继续在线，先后台预热非关键状态\n", mode)
 
 	// 阶段 1：不停机预热。先把一部分非关键状态放到 B，玩家仍在 A 上正常服务。
-	preloadSize := int64(20 * migproto.MiB)
+	preloadSize := int64(500 * migproto.MiB)
 	totalSent += sendChunk(conn, ackReader, "preload_background", preloadSize, 0x51)
 
 	// 提前准备关键状态，停机后只统计真正传关键状态和等待 B 确认的时间。
 	criticalPayload := migproto.BuildPayload(migproto.CriticalStateBytes, 0x66)
-	fmt.Printf("[Server-A][%s] 冻结玩家输入，只传关键状态\n", mode)
+	fmt.Printf("[Server-A][%s] ***** 关键传输开始：冻结玩家输入，只传关键状态 *****\n", mode)
 
-	// 阶段 2：极短停机。只传 256KB 关键状态，B 收到后玩家即可恢复。
+	// 阶段 2：极短停机。只传 10MB 关键状态，B 收到后玩家即可恢复。
 	freezeAt := time.Now()
+	state.freeze()
 	criticalSent := sendPayload(conn, ackReader, "critical_state", criticalPayload)
 	downtime := time.Since(freezeAt)
 	totalSent += criticalSent
+	state.markMigrated(downtime)
 
-	fmt.Printf("[Server-A][%s] 关键状态到达，玩家可在 Server-B 恢复\n", mode)
-	fmt.Printf("[Server-A][%s] 玩家感知停机时间=%.2fms\n",
+	fmt.Printf("[Server-A][%s] ***** 关键传输完成：关键状态到达，玩家可在 Server-B 恢复 *****\n", mode)
+	fmt.Printf("[Server-A][%s] Server-A停机时间=%.2fms\n",
 		mode, float64(downtime.Microseconds())/1000.0)
 
 	remaining := migproto.TotalStateBytes - preloadSize - migproto.CriticalStateBytes
@@ -94,6 +116,92 @@ func runMigration(targetAddr string) {
 
 	fmt.Printf("[Server-A][%s] 迁移完成，总传输量=%s，停机期传输量=%s\n",
 		mode, migproto.HumanSize(totalSent), migproto.HumanSize(criticalSent))
+}
+
+func serveClientRequests(addr string, serverBClientAddr string, state *playerState) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		fmt.Printf("[Server-A][%s] 客户端监听启动失败: %v\n", mode, err)
+		return
+	}
+	defer ln.Close()
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			fmt.Printf("[Server-A][%s] 客户端 Accept 失败: %v\n", mode, err)
+			continue
+		}
+		go handleClient(conn, serverBClientAddr, state)
+	}
+}
+
+func handleClient(conn net.Conn, serverBClientAddr string, state *playerState) {
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		seq := parseClientSeq(line)
+		if state.isMigrated() {
+			fmt.Fprintf(conn, "REDIRECT %s %s %.2f\n", serverBClientAddr, seq, state.downtime())
+			return
+		}
+		if state.isFrozen() {
+			state.waitResume()
+			fmt.Fprintf(conn, "REDIRECT %s %s %.2f\n", serverBClientAddr, seq, state.downtime())
+			return
+		}
+		fmt.Fprintf(conn, "OK A %s\n", seq)
+	}
+}
+
+func parseClientSeq(line string) string {
+	parts := strings.Fields(line)
+	if len(parts) >= 3 {
+		return parts[2]
+	}
+	return "0"
+}
+
+func (s *playerState) freeze() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frozen = true
+}
+
+func (s *playerState) markMigrated(downtime time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.migrated {
+		s.migrated = true
+		s.downtimeMs = float64(downtime.Microseconds()) / 1000.0
+		close(s.resume)
+	}
+}
+
+func (s *playerState) isFrozen() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.frozen
+}
+
+func (s *playerState) isMigrated() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.migrated
+}
+
+func (s *playerState) waitResume() {
+	<-s.resume
+}
+
+func (s *playerState) downtime() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.downtimeMs
 }
 
 func sendChunk(conn net.Conn, ackReader *bufio.Reader, label string, size int64, seed byte) int64 {

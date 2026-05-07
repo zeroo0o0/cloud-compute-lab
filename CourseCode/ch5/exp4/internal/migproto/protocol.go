@@ -11,13 +11,13 @@ import (
 const (
 	KiB = 1024
 	MiB = 1024 * KiB
-	// TotalStateBytes 表示模拟的完整玩家/进程状态大小，这里设为 50MB。
-	TotalStateBytes int64 = 50 * MiB
+	// TotalStateBytes 表示模拟的完整玩家/进程状态大小，这里设为 1000MB。
+	TotalStateBytes int64 = 1000 * MiB
 	// DirtyPageBytes 表示预复制实验里单个脏页的模拟大小。
-	DirtyPageBytes int64 = 1 * MiB
+	DirtyPageBytes int64 = 80 * MiB
 	// CriticalStateBytes 表示分波迁移里必须在停机窗口内传输的关键状态大小。
-	// 这里设为 256KB：明显小于 Pre-Copy 的 1MB 最终脏页，但比 6KB 更容易观察到毫秒级停机时间。
-	CriticalStateBytes int64 = 256 * KiB
+	// 这里设为 10MB：仍小于 Pre-Copy 的最终脏页，但能更清楚地观察停机窗口变化。
+	CriticalStateBytes int64 = 10 * MiB
 )
 
 // Event 是控制平面传输的迁移事件，用来记录当前阶段、数据量、停机时间等信息。
