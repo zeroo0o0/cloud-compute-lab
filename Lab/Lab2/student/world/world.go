@@ -129,8 +129,12 @@ func (w *World) AddPlayer(name string, conn *protocol.Conn) (int, *Player) {
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) RemovePlayer(id int) {
 	// TODO: 加写锁，从 map 中删除 id 对应的玩家
-
-	panic("RemovePlayer 尚未实现，请完成 TODO")
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if p, ok := w.players[id]; ok {
+		p.Online = false // 标记离线，阻止还在 Sleep 的复活任务执行
+		delete(w.players, id)
+	}
 }
 
 // ╔═════════════════════════════════════════════════════════════════════════╗
