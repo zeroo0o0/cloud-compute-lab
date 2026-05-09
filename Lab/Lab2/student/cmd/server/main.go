@@ -62,6 +62,7 @@ func main() {
 	// ║    }()                                                            ║
 	// ╚═══════════════════════════════════════════════════════════════════╝
 
+	// TODO D-1: 在此处启动广播 Goroutine
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
@@ -70,6 +71,7 @@ func main() {
 			if len(snapshot) == 0 {
 				continue
 			}
+			// 优化 1：预序列化
 			w.BroadcastAll(protocol.Message{
 				Type:    protocol.TypeBroadcast,
 				Players: snapshot,
@@ -97,7 +99,8 @@ func main() {
 		// ║  正确写法（并发）：  go handleClient(w, raw)                 ║
 		// ╚═══════════════════════════════════════════════════════════════╝
 
-		go handleClient(w, raw)
+		// TODO D-2: 将此行改为 Goroutine 调用
+		go handleClient(w, raw) // ← 请在此行前加 go 关键字
 	}
 }
 
@@ -139,8 +142,10 @@ func handleClient(w *world.World, raw net.Conn) {
 			event = w.MovePlayer(id, msg.Dir)
 		case protocol.TypeAttack:
 			event = w.AttackPlayer(id, w.BroadcastEvent)
+			w.BroadcastSnapshot() // 优化：攻击后立即同步血量快照
 		case protocol.TypeHeal:
 			event = w.HealPlayer(id)
+			w.BroadcastSnapshot() // 优化：回血后立即同步血量快照
 		}
 		if event != "" {
 			w.BroadcastEvent(event)

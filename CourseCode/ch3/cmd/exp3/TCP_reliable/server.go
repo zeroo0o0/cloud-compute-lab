@@ -3,62 +3,247 @@ package main
 import (
 	"fmt"
 	"net"
+	"strings"
+	"sync"
 	"time"
 )
 
+const (
+	sReset  = "\033[0m"
+	sBold   = "\033[1m"
+	sDim    = "\033[2m"
+	sRed    = "\033[91m"
+	sGreen  = "\033[92m"
+	sYellow = "\033[93m"
+	sCyan   = "\033[96m"
+	sWhite  = "\033[97m"
+	sBgBlue = "\033[44m"
+	sCls    = "\033[2J\033[H"
+)
+
+type playerSnapshot struct {
+	HP     int
+	Online bool
+	Alive  bool
+}
+
+type serverView struct {
+	mu       sync.Mutex
+	phase    string
+	player1  playerSnapshot
+	player2  playerSnapshot
+	ghost    bool
+	conflict bool
+	logs     []string
+}
+
 func main() {
+	view := &serverView{
+		phase:   "等待连接",
+		player1: playerSnapshot{HP: 100, Alive: true},
+		player2: playerSnapshot{HP: 100, Alive: true},
+	}
+	view.push("开始监听 127.0.0.1:8888")
+
+	go view.renderLoop()
+
 	listener, err := net.Listen("tcp", "127.0.0.1:8888")
 	if err != nil {
 		panic(err)
 	}
 	defer listener.Close()
 
-	fmt.Println("[服务器] 启动成功，开始监听端口 8888...")
+	conn1, err := listener.Accept()
+	if err != nil {
+		panic(err)
+	}
+	view.mu.Lock()
+	view.phase = "玩家1已接入"
+	view.player1.Online = true
+	view.mu.Unlock()
+	view.push("玩家1 已连接")
 
-	// 1. 接收玩家1
-	conn1, _ := listener.Accept()
-	fmt.Printf("[服务器] 玩家1连接: %s (初始HP: 100)\n", conn1.RemoteAddr().String())
+	conn2, err := listener.Accept()
+	if err != nil {
+		panic(err)
+	}
+	view.mu.Lock()
+	view.phase = "玩家2已上线"
+	view.player2.Online = true
+	view.mu.Unlock()
+	view.push("玩家2 已连接")
 
-	// 2. 接收玩家2
-	conn2, _ := listener.Accept()
-	fmt.Printf("[服务器] 玩家2连接: %s (初始HP: 100)\n", conn2.RemoteAddr().String())
+	if _, err = conn1.Write([]byte("P2_ONLINE")); err == nil {
+		view.push("已通知玩家1开始攻击")
+	}
 
-	// 3. 核心修改：通知玩家1，玩家2已经上线，可以开始攻击了
-	conn1.Write([]byte("P2_ONLINE"))
+	buf := make([]byte, 64)
+	if _, err = conn1.Read(buf); err != nil {
+		view.push("读取攻击指令失败")
+		return
+	}
 
-	// 4. 等待玩家1发起攻击的指令
-	buf := make([]byte, 1024)
-	conn1.Read(buf)
-	fmt.Println("[服务器] 接收到玩家1攻击指令，判定玩家2 HP 归零...")
+	view.mu.Lock()
+	view.phase = "服务器判定死亡"
+	view.player2.HP = 0
+	view.player2.Alive = false
+	view.mu.Unlock()
+	view.push("收到 ATTACK，玩家2 HP 归零")
 
-	// 稍微等待1秒，确保玩家2的终端已经真实断开底层连接
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 
 	msg := []byte("STATE: Player2 DEAD    ")
-
-	// 发送给玩家1
 	_, err1 := conn1.Write(msg)
-	fmt.Printf("[服务器] 发送给玩家1: 23 bytes, err=%v  <- 成功\n", err1)
-
-	// 发送给已经断线的玩家2
 	_, err2 := conn2.Write(msg)
-	fmt.Printf("[服务器] 发送给玩家2: 23 bytes, err=%v  <- 也\"成功\"！\n", err2)
 
-	fmt.Println("[服务器] 广播完成。")
-	fmt.Println("--------------------------------------------------")
-	fmt.Println("[服务器] 进入持续监听状态，等待断线玩家唤醒并重连...")
+	view.mu.Lock()
+	view.phase = "广播死亡结果"
+	view.ghost = err2 == nil
+	view.mu.Unlock()
+	if err1 == nil {
+		view.push("玩家1 收到死亡广播")
+	}
+	if err2 == nil {
+		view.push("旧连接写入仍显示成功")
+	} else {
+		view.push("旧连接写入失败")
+	}
 
-	// 无限循环，保持一直 listen 的状态
 	for {
 		conn3, err := listener.Accept()
 		if err != nil {
 			continue
 		}
-		
-		fmt.Printf("\n[服务器] 收到新连接: %s (检测到玩家重连)\n", conn3.RemoteAddr().String())
-		fmt.Println("[服务器] 严重状态冲突：服务器内存中该玩家已死，但新连接的客户端依然满血！")
-		
-		// 可以在这里回复重连成功的消息，保持连接存活
-		conn3.Write([]byte("WELCOME_BACK"))
+
+		view.mu.Lock()
+		view.phase = "检测到重连"
+		view.player2.Online = true
+		view.conflict = true
+		view.mu.Unlock()
+		view.push("玩家2 以新连接重新入场")
+
+		if _, err := conn3.Write([]byte("WELCOME_BACK")); err == nil {
+			view.push("已发送重连欢迎包")
+		}
 	}
+}
+
+func (v *serverView) push(msg string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.logs = append(v.logs, msg)
+	if len(v.logs) > 5 {
+		v.logs = v.logs[len(v.logs)-5:]
+	}
+}
+
+func (v *serverView) renderLoop() {
+	ticker := time.NewTicker(120 * time.Millisecond)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		v.mu.Lock()
+		frame := v.buildFrameLocked()
+		v.mu.Unlock()
+		fmt.Print(sCls + frame)
+	}
+}
+
+func (v *serverView) buildFrameLocked() string {
+	var b strings.Builder
+
+	b.WriteString(sCls)
+	fmt.Fprintf(&b, "%s%s%s  TCP Reliable Lab  玩家终端  %s\n\n", sBold, sBgBlue, sWhite, sReset)
+	fmt.Fprintf(&b, "  视角：%s服务器%s\n", sCyan, sReset)
+	fmt.Fprintf(&b, "  阶段：%s%s%s\n\n", sYellow, v.phase, sReset)
+
+	sBattlefield(&b, v)
+
+	fmt.Fprintf(&b, "\n  玩家1生命 [%s]\n", sHP(v.player1.HP))
+	fmt.Fprintf(&b, "  玩家2生命 [%s]\n", sHP(v.player2.HP))
+	fmt.Fprintf(&b, "\n  现  象：%s%s%s\n", effectColor(v.ghost, v.conflict), effectText(v.ghost, v.conflict), sReset)
+	fmt.Fprintf(&b, "\n  记录：\n")
+	for _, log := range v.logs {
+		fmt.Fprintf(&b, "  %s• %s%s\n", sDim, log, sReset)
+	}
+
+	return b.String()
+}
+
+func sBattlefield(b *strings.Builder, v *serverView) {
+	grid := [5][9]string{}
+	for y := range grid {
+		for x := range grid[y] {
+			grid[y][x] = "·"
+		}
+	}
+
+	p1x, p1y := 1, 2
+	p2x, p2y := 7, 2
+	if v.player1.Online {
+		grid[p1y][p1x] = sCyan + "1" + sReset
+	}
+
+	if v.player2.HP == 0 {
+		grid[p2y][p2x] = sRed + "X" + sReset
+	} else if v.player2.Online {
+		grid[p2y][p2x] = sYellow + "2" + sReset
+	}
+
+	if v.player1.Online && v.player2.Online && v.player2.HP > 0 {
+		grid[p2y][3] = sYellow + ">" + sReset
+		grid[p2y][4] = sYellow + ">" + sReset
+		grid[p2y][5] = sYellow + ">" + sReset
+	}
+
+	b.WriteString("\n  战场网格：\n")
+	b.WriteString("  +-------------------+\n")
+	for y := range grid {
+		var row strings.Builder
+		for x := range grid[y] {
+			row.WriteString(grid[y][x])
+			if x != len(grid[y])-1 {
+				row.WriteString(" ")
+			}
+		}
+		fmt.Fprintf(b, "  | %s |\n", row.String())
+	}
+	b.WriteString("  +-------------------+\n")
+	fmt.Fprintf(b, "  %s1%s=玩家1  %s2%s=玩家2  %sX%s=服务器判死\n", sCyan, sReset, sYellow, sReset, sRed, sReset)
+}
+
+func sHP(hp int) string {
+	total := 16
+	fill := hp * total / 100
+	if fill < 0 {
+		fill = 0
+	}
+	if fill > total {
+		fill = total
+	}
+	color := sGreen
+	if hp <= 30 {
+		color = sRed
+	}
+	return color + strings.Repeat("|", fill) + sReset + sDim + strings.Repeat(".", total-fill) + sReset + fmt.Sprintf(" %3d", hp)
+}
+
+func effectText(ghost, conflict bool) string {
+	if conflict {
+		return "服务器记忆中玩家2已死，但新连接客户端仍以满血出现"
+	}
+	if ghost {
+		return "玩家2旧连接已断开，但写入时看起来仍然成功"
+	}
+	return "等待实验事件发生"
+}
+
+func effectColor(ghost, conflict bool) string {
+	if conflict {
+		return sRed
+	}
+	if ghost {
+		return sYellow
+	}
+	return sGreen
 }

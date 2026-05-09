@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -92,7 +93,14 @@ func drawUI() {
 
 	// 2. 绘制玩家状态列表
 	sb.WriteString("\n─── 战场快报 ─────────────────────────────────────────\033[K\n")
-	for _, p := range latestSnapshot.Players {
+
+	// 对玩家列表进行排序，确保渲染顺序稳定（ID 从小到大）
+	players := append([]protocol.PlayerInfo{}, latestSnapshot.Players...)
+	sort.Slice(players, func(i, j int) bool {
+		return players[i].ID < players[j].ID
+	})
+
+	for _, p := range players {
 		tag := "  "
 		if p.ID == myPlayerID {
 			tag = "▶ "
@@ -120,9 +128,16 @@ func drawUI() {
 }
 
 func hpBar(hp, maxHP, w int) string {
+	if hp < 0 {
+		hp = 0
+	}
 	filled := 0
 	if maxHP > 0 {
-		filled = hp * w / maxHP
+		// 使用浮点数计算比例并四舍五入，确保实时同步的精确性
+		filled = int(float64(hp) / float64(maxHP) * float64(w))
+	}
+	if filled > w {
+		filled = w
 	}
 	return fmt.Sprintf("[%s%s]%3d",
 		strings.Repeat("█", filled), strings.Repeat("░", w-filled), hp)
@@ -139,9 +154,10 @@ func main() {
 
 	// ★ 核心修复：进入终端的 Alternate Screen Buffer (类似 vim 的全屏模式)
 	// 这样就不会污染终端滚动历史，也不会因为超出高度导致画面无限下卷
-	fmt.Print("\033[?1049h\033[2J\033[H")
-	// 退出程序时，恢复终端原本的视图
-	defer fmt.Print("\033[?1049l")
+	// \033[?1049h 进入交替屏幕；\033[?1000h 开启鼠标事件抓取以阻止滚动
+	fmt.Print("\033[?1049h\033[?1000h\033[2J\033[H")
+	// 退出程序时，恢复终端原本的视图，并关闭鼠标抓取
+	defer fmt.Print("\033[?1000l\033[?1049l")
 
 	raw, err := net.Dial("tcp", serverAddr)
 	if err != nil {
@@ -211,23 +227,29 @@ func main() {
 		for {
 			msg, err := conn.Receive()
 			if err != nil {
-				addEvent("与服务器的连接已断开。")
+				addEvent("✨ 极光闪过，你与世界的连接断开了...")
 				drawUI()
 				return
 			}
 			switch msg.Type {
 			case protocol.TypeInit:
 				myPlayerID = msg.YourID
-				addEvent(fmt.Sprintf("🎮 %s（你的ID: %d）", msg.Text, myPlayerID))
+				addEvent(fmt.Sprintf("🌟 维度传送完成！你的 ID 是: %d", myPlayerID))
+				addEvent("💡 温馨提示：按 '?' 可以随时查看技能秘籍")
 				drawUI()
 			case protocol.TypeBroadcast:
 				updateSnapshot(msg)
 				drawUI()
 			case protocol.TypeEvent:
-				addEvent(msg.Text)
+				// 加入一点点独特的修饰
+				if !strings.HasPrefix(msg.Text, "📢") {
+					addEvent("⚡ " + msg.Text)
+				} else {
+					addEvent(msg.Text)
+				}
 				drawUI()
 			case protocol.TypeGameOver:
-				addEvent(fmt.Sprintf("💀 游戏通知: %s", msg.Winner))
+				addEvent(fmt.Sprintf("🏆 最终审判: %s 获得了胜利！", msg.Winner))
 				drawUI()
 			}
 		}
@@ -245,6 +267,21 @@ func main() {
 		if err != nil {
 			return
 		}
+
+		// 忽略 ANSI 转义序列（如方向键、滚轮产生的 \033[A, \033[M 等）
+		if key == 27 { // 27 是 ESC (\033) 的 ASCII 码
+			// 如果读到了 ESC，说明可能是一个多字节序列的开始
+			if keyReader.Buffered() >= 1 {
+				next, _ := keyReader.Peek(1)
+				if next[0] == '[' || next[0] == '<' || next[0] == 'M' {
+					// 这是一个转义序列或鼠标序列，清空缓冲区中剩余的相关字节
+					// 以防剩余字节（如 'A'）被误认为是按键指令
+					keyReader.Discard(keyReader.Buffered())
+					continue
+				}
+			}
+		}
+
 		if key == 3 {
 			return
 		}

@@ -21,6 +21,7 @@
 package world
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -43,6 +44,7 @@ type Player struct {
 	Alive   bool
 	Kills   int
 	Conn    *protocol.Conn
+	Online  bool // 在线状态，用于生命周期管理
 }
 
 // newPlayer 在随机位置创建玩家，已实现，无需修改。
@@ -57,6 +59,7 @@ func newPlayer(id int, name string, conn *protocol.Conn) *Player {
 		Potions: protocol.MaxPotions,
 		Alive:   true,
 		Conn:    conn,
+		Online:  true,
 	}
 }
 
@@ -102,9 +105,10 @@ func NewWorld() *World {
 // ║    5. 返回 id 和玩家指针                                                ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) AddPlayer(name string, conn *protocol.Conn) (int, *Player) {
+	// TODO: 加写锁，创建玩家，存入 map，返回 id 和玩家
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
 	id := w.nextID
 	w.nextID++
 	p := newPlayer(id, name, conn)
@@ -124,10 +128,9 @@ func (w *World) AddPlayer(name string, conn *protocol.Conn) (int, *Player) {
 // ║    2. delete(w.players, id)                                             ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) RemovePlayer(id int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	// TODO: 加写锁，从 map 中删除 id 对应的玩家
 
-	delete(w.players, id)
+	panic("RemovePlayer 尚未实现，请完成 TODO")
 }
 
 // ╔═════════════════════════════════════════════════════════════════════════╗
@@ -149,6 +152,7 @@ func (w *World) RemovePlayer(id int) {
 // ║    5. 若坐标未变，返回"撞墙"字符串；否则返回移动成功字符串             ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) MovePlayer(id int, dir string) string {
+	// TODO: 加写锁，查找玩家，移动并做边界检查，返回事件字符串
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -177,11 +181,10 @@ func (w *World) MovePlayer(id int, dir string) string {
 		}
 	}
 
-	if oldX == p.X && oldY == p.Y {
-		return fmt.Sprintf("🧱 %s 撞墙了，无法移动", p.Name)
+	if p.X == oldX && p.Y == oldY {
+		return fmt.Sprintf("🧱 %s 撞到了地图边界！", p.Name)
 	}
-
-	return fmt.Sprintf("🚶 %s 移动到了 (%d,%d)", p.Name, p.X, p.Y)
+	return fmt.Sprintf("🏃 %s 移至 (%d, %d)", p.Name, p.X, p.Y)
 }
 
 // ╔═════════════════════════════════════════════════════════════════════════╗
@@ -210,6 +213,7 @@ func (w *World) MovePlayer(id int, dir string) string {
 // ║      因此主函数释放锁后，复活 Goroutine 才能获取锁，不会死锁。          ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) AttackPlayer(attackerID int, broadcastFn func(string)) string {
+	// TODO: 加写锁，查找攻击者，找最弱目标，扣血，处理死亡与复活 Goroutine
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -219,21 +223,23 @@ func (w *World) AttackPlayer(attackerID int, broadcastFn func(string)) string {
 	}
 
 	var target *Player
+	minHP := math.MaxInt32
+
 	for _, p := range w.players {
 		if p.ID == attackerID || !p.Alive {
 			continue
 		}
 		dist := math.Abs(float64(attacker.X-p.X)) + math.Abs(float64(attacker.Y-p.Y))
-		if dist > protocol.AttackRange {
-			continue
-		}
-		if target == nil || p.HP < target.HP {
-			target = p
+		if dist <= float64(protocol.AttackRange) {
+			if p.HP < minHP {
+				minHP = p.HP
+				target = p
+			}
 		}
 	}
 
 	if target == nil {
-		return fmt.Sprintf("⚔️ %s 范围内没有敌人", attacker.Name)
+		return "🚫 范围内没有敌人"
 	}
 
 	target.HP -= protocol.AttackDmg
@@ -246,15 +252,14 @@ func (w *World) AttackPlayer(attackerID int, broadcastFn func(string)) string {
 		targetName := target.Name
 		go func() {
 			time.Sleep(5 * time.Second)
-			w.respawn(targetID)
-			broadcastFn(fmt.Sprintf("✨ %s 已复活！", targetName))
+			if success := w.respawn(targetID); success {
+				broadcastFn(fmt.Sprintf("✨ %s 已复活", targetName))
+			}
 		}()
-
-		return fmt.Sprintf("💥 %s 击败了 %s！", attacker.Name, targetName)
+		return fmt.Sprintf("⚔️ %s 击败了 %s！", attacker.Name, targetName)
 	}
 
-	return fmt.Sprintf("⚔️ %s 攻击了 %s，造成 %d 伤害（目标 HP: %d）",
-		attacker.Name, target.Name, protocol.AttackDmg, target.HP)
+	return fmt.Sprintf("⚔️ %s 攻击 %s (HP: %d)", attacker.Name, target.Name, target.HP)
 }
 
 // HealPlayer 使用药水，已实现，无需修改。
@@ -279,19 +284,20 @@ func (w *World) HealPlayer(id int) string {
 }
 
 // respawn 在写锁内重置玩家到随机位置并恢复满血（由复活 Goroutine 调用）。
-// 已实现，无需修改。
-func (w *World) respawn(id int) {
+// 返回布尔值代表复活是否成功完成（如果玩家已离线则不复活）。
+func (w *World) respawn(id int) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	p, ok := w.players[id]
-	if !ok {
-		return
+	if !ok || !p.Online {
+		return false
 	}
 	p.X = rand.Intn(protocol.MapWidth)
 	p.Y = rand.Intn(protocol.MapHeight)
 	p.HP = p.MaxHP
 	p.Potions = protocol.MaxPotions
 	p.Alive = true
+	return true
 }
 
 // ╔═════════════════════════════════════════════════════════════════════════╗
@@ -310,6 +316,7 @@ func (w *World) respawn(id int) {
 // ║    4. 返回 infos                                                        ║
 // ╚═════════════════════════════════════════════════════════════════════════╝
 func (w *World) GetSnapshot() []protocol.PlayerInfo {
+	// TODO: 加读锁，遍历 players，收集并返回所有玩家的 Info 快照
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
@@ -322,8 +329,15 @@ func (w *World) GetSnapshot() []protocol.PlayerInfo {
 
 // ─── 广播辅助（无需修改） ────────────────────────────────────────────────────
 
-// BroadcastAll 向所有在线玩家发送消息。先读锁收集连接，再锁外发送。
+// BroadcastAll 向所有在线玩家分发消息。支持预序列化以优化性能。
 func (w *World) BroadcastAll(msg protocol.Message) {
+	// 优化 1：预序列化
+	data, err := json.Marshal(msg)
+	if err != nil {
+		fmt.Printf("广播序列化失败: %v\n", err)
+		return
+	}
+
 	w.mu.RLock()
 	conns := make([]*protocol.Conn, 0, len(w.players))
 	for _, p := range w.players {
@@ -331,7 +345,19 @@ func (w *World) BroadcastAll(msg protocol.Message) {
 	}
 	w.mu.RUnlock()
 	for _, c := range conns {
-		c.Send(msg)
+		// 优化 1 & 3：使用异步且预序列化的分发
+		c.SendRaw(data)
+	}
+}
+
+// BroadcastSnapshot 立即广播当前世界快照。
+func (w *World) BroadcastSnapshot() {
+	snapshot := w.GetSnapshot()
+	if len(snapshot) > 0 {
+		w.BroadcastAll(protocol.Message{
+			Type:    protocol.TypeBroadcast,
+			Players: snapshot,
+		})
 	}
 }
 
