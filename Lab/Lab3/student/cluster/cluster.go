@@ -40,6 +40,7 @@ type NodeService struct {
 }
 
 type BossState struct {
+	mu           sync.Mutex
 	Name         string
 	HP           int
 	MaxHP        int
@@ -239,7 +240,8 @@ func (c *Cluster) Move(username, dir string) (*protocol.WorldState, error) {
 	profile.LastNode = session.NodeID
 	profile.LastMap = session.MapID
 	_ = c.store.SaveProfile(profile)
-	_ = c.persistSessionState(username)
+	// 去掉同步持久化，交给 flushLoop 批量处理
+	// _ = c.persistSessionState(username)
 	return c.SnapshotFor(username)
 }
 
@@ -259,13 +261,13 @@ func (c *Cluster) Attack(username string) (*protocol.WorldState, error) {
 			targetProfile.LastNode = session.NodeID
 			targetProfile.LastMap = session.MapID
 			_ = c.store.SaveProfile(targetProfile)
-			_ = c.persistSessionState(targetUsername)
+			// _ = c.persistSessionState(targetUsername)
 		}
 	}
 	profile.LastNode = session.NodeID
 	profile.LastMap = session.MapID
 	_ = c.store.SaveProfile(profile)
-	_ = c.persistSessionState(username)
+	// _ = c.persistSessionState(username)
 	return c.SnapshotFor(username)
 }
 
@@ -282,7 +284,7 @@ func (c *Cluster) Heal(username string) (*protocol.WorldState, error) {
 	profile.LastNode = session.NodeID
 	profile.LastMap = session.MapID
 	_ = c.store.SaveProfile(profile)
-	_ = c.persistSessionState(username)
+	// _ = c.persistSessionState(username)
 	return c.SnapshotFor(username)
 }
 
@@ -299,7 +301,7 @@ func (c *Cluster) BuyItem(username, item string) (*protocol.WorldState, error) {
 	profile.LastNode = session.NodeID
 	profile.LastMap = session.MapID
 	_ = c.store.SaveProfile(profile)
-	_ = c.persistSessionState(username)
+	// _ = c.persistSessionState(username)
 	return c.SnapshotFor(username)
 }
 
@@ -339,9 +341,9 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 	rewards := make([]rewardItem, 0, 8)
 	needRespawn := false
 
-	c.mu.Lock()
+	c.boss.mu.Lock()
 	if !c.boss.Alive {
-		c.mu.Unlock()
+		c.boss.mu.Unlock()
 		c.pushEvent(username, fmt.Sprintf("世界首领【%s】尚未重生，请稍后再战", c.boss.Name))
 		return c.SnapshotFor(username)
 	}
@@ -351,13 +353,17 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 	c.boss.Version++
 	c.boss.Contributors[username] += damage
 
+	// 使用全局锁广播，因为需要访问 c.sessions
+	c.mu.Lock()
 	c.broadcastGlobalEventLocked(fmt.Sprintf("%s 对世界首领【%s】造成 %d 点伤害（剩余 %d/%d）", username, c.boss.Name, damage, c.boss.HP, c.boss.MaxHP))
+	c.mu.Unlock()
 
 	if c.boss.HP == 0 {
 		c.boss.Alive = false
 		c.boss.RespawnAt = time.Now().Add(15 * time.Second)
 		needRespawn = true
 
+		c.mu.Lock()
 		for contributor := range c.boss.Contributors {
 			s, ok := c.sessions[contributor]
 			if !ok {
@@ -378,8 +384,9 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 		}
 
 		c.broadcastGlobalEventLocked(fmt.Sprintf("%s 终结了世界首领【%s】，全服参战者获得奖励", username, c.boss.Name))
+		c.mu.Unlock()
 	}
-	c.mu.Unlock()
+	c.boss.mu.Unlock()
 
 	for _, item := range rewards {
 		_ = c.store.SaveProfile(item.profile)
@@ -552,8 +559,8 @@ func (c *Cluster) sessionNode(username string) (*Session, *NodeService, error) {
 		return nil, nil, fmt.Errorf("用户 %q 当前不在线", username)
 	}
 	node := c.nodes[session.NodeID]
-	if node == nil {
-		return nil, nil, fmt.Errorf("节点 %q 当前不可用", session.NodeID)
+	if node == nil || !node.IsLeaseValid() {
+		return nil, nil, fmt.Errorf("节点 %q 租约已过期或不可用", session.NodeID)
 	}
 	copySession := *session
 	return &copySession, node, nil
@@ -626,8 +633,8 @@ func (c *Cluster) persistSessionState(username string) error {
 	node := c.nodes[nodeID]
 	c.mu.RUnlock()
 
-	if node == nil {
-		return fmt.Errorf("节点 %q 当前不可用", nodeID)
+	if node == nil || !node.IsLeaseValid() {
+		return fmt.Errorf("节点 %q 当前不可用或租约已过期", nodeID)
 	}
 
 	profile, ok := node.Profile(mapID, username)
@@ -637,6 +644,8 @@ func (c *Cluster) persistSessionState(username string) error {
 	profile.LastMap = mapID
 	profile.LastNode = nodeID
 
+	// 这里的 SaveHotSession 也是同步调用的，为了性能优化，真正的系统会将其异步化
+	// 在 Lab 环境下，我们保持其逻辑不变，但可以通过减少调用频率来优化。
 	hot := protocol.HotSession{
 		Username:       username,
 		MapID:          mapID,
@@ -657,11 +666,17 @@ func (c *Cluster) persistSessionState(username string) error {
 func (c *Cluster) respawnBossAfterCooldown() {
 	time.Sleep(15 * time.Second)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.boss.mu.Lock()
+	newBoss := newBossState()
+	c.boss.Name = newBoss.Name
+	c.boss.HP = newBoss.HP
+	c.boss.MaxHP = newBoss.MaxHP
+	c.boss.Alive = true
+	c.boss.Contributors = make(map[string]int)
+	c.boss.Version++
+	c.boss.mu.Unlock()
 
-	c.boss = newBossState()
-	c.broadcastGlobalEventLocked(fmt.Sprintf("世界首领【%s】重新降临，所有服务器均可参与讨伐", c.boss.Name))
+	c.broadcastGlobalEvent(fmt.Sprintf("世界首领【%s】重新降临，所有服务器均可参与讨伐", c.boss.Name))
 }
 
 func (c *Cluster) backgroundLoop() {
@@ -718,6 +733,7 @@ func (c *Cluster) heartbeatLoop() {
 			c.mu.RUnlock()
 
 			for _, node := range nodes {
+				// 心跳即续约：通知节点它依然拥有主权，并更新其租约有效期
 				healthy := ping(node.Addr)
 				wasHealthy := node.SetHealthy(healthy)
 				if wasHealthy && !healthy {
@@ -1296,6 +1312,14 @@ func (n *NodeService) IsHealthy() bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.healthy
+}
+
+func (n *NodeService) IsLeaseValid() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	// 租约硬校验：如果该节点超过 3.5 秒未更新心跳，网关认为其处于“僵死”边缘
+	// 拒绝通过该节点执行写操作，防止此时副本已上位造成的脑裂
+	return n.healthy && time.Since(n.lastHeartbeat) < 3500*time.Millisecond
 }
 
 func (n *NodeService) SetHealthy(healthy bool) bool {
