@@ -1,3 +1,14 @@
+// cluster 包负责管理多地图、多节点的集群控制面逻辑。
+//
+// 本文件实现了：
+// - 集群元数据（节点、地图所属关系、会话）管理
+// - 跨节点的会话路由、地图切换逻辑
+// - 世界首领（Boss）的全服共享状态与结算逻辑
+// - 主节点检查点的周期生成与副本同步
+// - 节点故障检测与主从提升（故障切换）
+//
+// 注：此文件为教学实验代码，许多实现为了简洁直接在内存中管理状态，真实生产环境
+// 应该引入持久化元数据、分布式协调（如 lease/lock）与更强的错误恢复策略。
 package cluster
 
 import (
@@ -15,6 +26,11 @@ import (
 	"battleworld/world"
 )
 
+// Session 表示网关层对某个在线用户的会话视图。
+// - Username: 用户名标识
+// - MapID / NodeID: 当前所在地图与承载节点（由 owners 路由决定）
+// - Events: 待发送给客户端的简短事件日志（轮询时被带回）
+// - Version: 会话版本号，用于客户端判断状态更新
 type Session struct {
 	Username string
 	MapID    string
@@ -23,11 +39,16 @@ type Session struct {
 	Version  int64
 }
 
+// MapEvents 是 NodeService 背景执行结果的简易封装，表示某一地图产生的一组事件，
+// 由 Cluster.backgroundLoop 收集后广播到对应地图的会话中。
 type MapEvents struct {
 	MapID  string
 	Events []string
 }
 
+// NodeService 表示集群中的一个服务节点（承载主分片或副本）。
+// 它封装了对本地 world.World 实例的管理，以及副本快照的内存缓存。
+// 注意：NodeService 同时承担网络心跳监听（仅用于探针）和地图实例的本地方法调用。
 type NodeService struct {
 	mu               sync.RWMutex
 	ID               string
@@ -39,6 +60,9 @@ type NodeService struct {
 	ln               net.Listener
 }
 
+// BossState 表示“世界首领”的全局热状态。
+// - 使用内部的 mu 保护自身字段，集群对 Boss 的读写需要通过该 mutex 保证单写者更新。
+// - Contributors 记录各玩家对首领造成的累计伤害，用于终结时的奖励分配。
 type BossState struct {
 	mu           sync.Mutex
 	Name         string
@@ -52,6 +76,12 @@ type BossState struct {
 	Contributors map[string]int
 }
 
+// Cluster 为控制面主对象，负责管理全局元数据与对 NodeService 的协调。
+// 关键字段：
+// - mu: 保护集群的元数据（nodes、sessions、owners、replicas、configs）
+// - store: 本地持久化（冷/热数据）接口
+// - boss: 全服 Boss 的热状态（单独受 BossState.mu 保护）
+// - stopCh: 用于优雅关闭后台循环
 type Cluster struct {
 	mu       sync.RWMutex
 	store    *storage.Store
@@ -96,12 +126,15 @@ func NewCluster(store *storage.Store) (*Cluster, error) {
 		"ruins": {owner: "node-a", replica: "node-b"},
 	}
 
+	// 根据预设的分配表安装主分片并尝试装载已有检查点到主从节点
+	// 说明：初始部署时为每张地图指定 owner/replica，若存储中存在快照则恢复
 	for mapID, placement := range assignments {
 		cfg := c.configs[mapID]
 		c.owners[mapID] = placement.owner
 		c.replicas[mapID] = placement.replica
 		c.nodes[placement.owner].InstallPrimaryMap(cfg)
 		if cp, ok := store.LoadCheckpoint(mapID); ok {
+			// 从持久化快照恢复主节点的地图实例，并将快照写入副本内存
 			c.nodes[placement.owner].RestorePrimaryMap(cfg, *cp)
 			c.nodes[placement.replica].StoreReplica(*cp)
 		}
@@ -111,6 +144,11 @@ func NewCluster(store *storage.Store) (*Cluster, error) {
 }
 
 func (c *Cluster) Start() error {
+	// 启动所有 node 的探针服务（用于心跳检测），并启动控制面的后台循环：
+	// - backgroundLoop: 收集各 node 的地图背景事件并广播
+	// - heartbeatLoop: 定期 ping 各 node，发现故障并触发故障切换
+	// - checkpointLoop: 周期性生成并分发地图检查点到副本
+	// - flushLoop: 周期性将热会话落盘到存储
 	for _, node := range c.nodes {
 		if err := node.Start(); err != nil {
 			return err
@@ -184,6 +222,8 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 		return nil, errors.New("目标地图当前没有可用节点")
 	}
 
+	// 将用户添加到目标节点的地图实例，并在网关侧创建 session 记录。
+	// 注意：AddPlayer 会尝试基于持久化 profile 恢复玩家位置/状态（含复活检查）。
 	owner.AddPlayer(mapID, profile)
 
 	c.mu.Lock()
@@ -200,6 +240,7 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 	c.sessions[username] = session
 	c.mu.Unlock()
 
+	// 将热会话与用户冷数据持久化，便于重连/故障恢复时恢复玩家状态
 	_ = c.persistSessionState(username)
 	return c.SnapshotFor(username)
 }
@@ -329,6 +370,7 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 		return c.SnapshotFor(username)
 	}
 
+	// 计算玩家对首领的伤害（示例策略：攻击力 + 战利品 / 2，最低 20）
 	damage := profile.Attack + profile.Treasures/2
 	if damage < 20 {
 		damage = 20
@@ -341,6 +383,8 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 	rewards := make([]rewardItem, 0, 8)
 	needRespawn := false
 
+	// 对 boss 做单写更新，使用 boss 内部的 mutex 保证同一时刻只有一个写入者。
+	// 读操作应调用 c.boss.viewLocked()，避免直接访问字段。
 	c.boss.mu.Lock()
 	if !c.boss.Alive {
 		c.boss.mu.Unlock()
@@ -353,7 +397,8 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 	c.boss.Version++
 	c.boss.Contributors[username] += damage
 
-	// 使用全局锁广播，因为需要访问 c.sessions
+	// 广播事件到所有在线会话，使用 cluster 的 mu 保护 sessions 结构。
+	// 这里会将攻击信息发送给所有在线玩家，保证全服一致可见性。
 	c.mu.Lock()
 	c.broadcastGlobalEventLocked(fmt.Sprintf("%s 对世界首领【%s】造成 %d 点伤害（剩余 %d/%d）", username, c.boss.Name, damage, c.boss.HP, c.boss.MaxHP))
 	c.mu.Unlock()
@@ -363,6 +408,7 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 		c.boss.RespawnAt = time.Now().Add(15 * time.Second)
 		needRespawn = true
 
+		// 首领被击杀：遍历贡献者，为参与者在其承载节点上结算奖励并把结果写回持久化
 		c.mu.Lock()
 		for contributor := range c.boss.Contributors {
 			s, ok := c.sessions[contributor]
@@ -377,12 +423,15 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 			if !ok {
 				continue
 			}
+			// 将奖励更新写回 profile 的 LastMap/LastNode，便于后续持久化恢复
 			updated.LastMap = s.MapID
 			updated.LastNode = s.NodeID
 			rewards = append(rewards, rewardItem{username: contributor, profile: updated})
+			// 同步将事件推入该玩家会话，客户端下次 Snapshot 会看到
 			c.pushEventLocked(s, fmt.Sprintf("你参与讨伐并获得奖励：战利品 +%d，胜场 +%d", 6, 1))
 		}
 
+		// 全服广播终结事件，包含终结者信息
 		c.broadcastGlobalEventLocked(fmt.Sprintf("%s 终结了世界首领【%s】，全服参战者获得奖励", username, c.boss.Name))
 		c.mu.Unlock()
 	}
@@ -418,6 +467,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 	toNode := c.nodes[toNodeID]
 	c.mu.RUnlock()
 
+	// 校验目标节点可用性（拒绝切换到不可用或不存在的承载节点）
 	if fromNode == nil || toNode == nil || !toNode.IsHealthy() {
 		return nil, errors.New("目标地图当前没有可用节点")
 	}
@@ -427,6 +477,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		return c.SnapshotFor(username)
 	}
 
+	// 读取当前玩家在源地图的 profile，用于判断是否可以切图（如倒地状态禁止切图）
 	currentProfile, ok := fromNode.Profile(fromMap, username)
 	if !ok {
 		return nil, errors.New("当前角色不在源地图中")
@@ -436,6 +487,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		return c.SnapshotFor(username)
 	}
 
+	// 从源节点摘除玩家热状态（RemovePlayer 会返回可持久化的 profile）
 	profile, removed := fromNode.RemovePlayer(fromMap, username)
 	if !removed {
 		profile = currentProfile
@@ -453,6 +505,8 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 	}
 	c.mu.Unlock()
 
+	// 更新持久化信息：profile.LastMap/LastNode 记录玩家当前位置信息，
+	// 并把热会话写回 hot 存储，便于重连或故障恢复。
 	profile.LastMap = targetMap
 	profile.LastNode = toNodeID
 	_ = c.store.SaveProfile(profile)
@@ -621,10 +675,13 @@ func (c *Cluster) broadcastMapEvent(mapID, event string) {
 }
 
 func (c *Cluster) persistSessionState(username string) error {
+	// persistSessionState 将在线会话的热数据写入 hot 存储，并同步用户的冷数据（profile）
+	// 注意：该方法会被 flushLoop 周期调用，因此必须尽量保持高效且容错。
 	c.mu.RLock()
 	session, ok := c.sessions[username]
 	if !ok {
 		c.mu.RUnlock()
+		// 用户不在线时删除热会话条目
 		return c.store.DeleteHotSession(username)
 	}
 	mapID := session.MapID
@@ -633,6 +690,7 @@ func (c *Cluster) persistSessionState(username string) error {
 	node := c.nodes[nodeID]
 	c.mu.RUnlock()
 
+	// 如果承载节点不可用或租约失效，应当返回错误，由调用方决定是否重试或记录告警。
 	if node == nil || !node.IsLeaseValid() {
 		return fmt.Errorf("节点 %q 当前不可用或租约已过期", nodeID)
 	}
@@ -641,11 +699,11 @@ func (c *Cluster) persistSessionState(username string) error {
 	if !ok {
 		return fmt.Errorf("玩家 %q 当前不在地图 %q", username, mapID)
 	}
+	// 更新 profile 的位置信息，随后写回冷数据文件
 	profile.LastMap = mapID
 	profile.LastNode = nodeID
 
-	// 这里的 SaveHotSession 也是同步调用的，为了性能优化，真正的系统会将其异步化
-	// 在 Lab 环境下，我们保持其逻辑不变，但可以通过减少调用频率来优化。
+	// HotSession 保存在线会话的热视图，写入频率由 flushLoop 控制以降低 IO 压力
 	hot := protocol.HotSession{
 		Username:       username,
 		MapID:          mapID,
@@ -747,6 +805,11 @@ func (c *Cluster) heartbeatLoop() {
 }
 
 func (c *Cluster) checkpointLoop() {
+	// checkpointLoop 周期性地从每个主节点抓取地图快照（MapCheckpoint），并同步到副本节点与持久化存储。
+	// 设计要点：
+	// - 只对健康的主节点抓取快照，跳过离线或不可用节点，避免污染副本
+	// - 将快照写入 store（持久化），并把快照放到目标 replica 的内存快照中以便快速提升
+	// - 在真实系统中应当对 IO 做限流、差分快照与压缩，这里简化为全量写入
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -782,12 +845,15 @@ func (c *Cluster) checkpointLoop() {
 			}
 			c.mu.RUnlock()
 
+			// 将快照工作下沉为同步调用到各 owner 上（可进一步异步化以避免阻塞本循环）
 			for _, p := range plans {
 				cp, err := p.owner.Checkpoint(p.mapID)
 				if err != nil {
 					continue
 				}
+				// 写入持久化以便长期恢复
 				_ = c.store.SaveCheckpoint(cp)
+				// 将快照复制到副本节点的内存缓存，便于快速提升
 				if p.replica != nil {
 					p.replica.StoreReplica(cp)
 				}
@@ -822,6 +888,13 @@ func (c *Cluster) flushLoop() {
 }
 
 func (c *Cluster) handleNodeFailure(nodeID string) {
+	// handleNodeFailure 负责在检测到某个主节点故障时完成：
+	// 1) 找到该节点承载的主分片（maps）
+	// 2) 选择健康的副本或其他节点作为新的主（Promote 或基于 checkpoint 恢复）
+	// 3) 更新 owners / replicas 元数据
+	// 4) 修正受影响玩家的 session.NodeID 并将必要的 profile 持久化
+	//
+	// 注意：该实现为简化版，使用内存元数据进行提升与路由更新；真实系统需要分布式一致性协议避免脑裂。
 	type persistedProfile struct {
 		username string
 		profile  protocol.UserProfile
@@ -836,6 +909,7 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 		return
 	}
 
+	// 收集该节点主持的所有地图
 	mapIDs := make([]string, 0, len(c.owners))
 	for mapID, ownerID := range c.owners {
 		if ownerID == nodeID {
@@ -849,6 +923,7 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 		nextOwnerID := ""
 		replicaID := c.replicas[mapID]
 
+		// 优先选择已有的 replica（如果健康并能 promote）
 		if replicaID != "" {
 			if replica := c.nodes[replicaID]; replica != nil && replica.IsHealthy() {
 				if err := replica.Promote(mapID, cfg); err == nil {
@@ -857,6 +932,7 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 			}
 		}
 
+		// 如果没有可用的副本，选择其他健康节点尝试 promote 或从 checkpoint 恢复
 		if nextOwnerID == "" {
 			candidateID := c.pickReplicaLocked(nodeID)
 			if candidateID != "" {
@@ -864,6 +940,7 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 				if err := candidate.Promote(mapID, cfg); err == nil {
 					nextOwnerID = candidateID
 				} else if cp, ok := c.store.LoadCheckpoint(mapID); ok {
+					// 使用持久化快照恢复到 candidate 上
 					candidate.RestorePrimaryMap(cfg, *cp)
 					nextOwnerID = candidateID
 				}
@@ -871,15 +948,19 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 		}
 
 		if nextOwnerID == "" {
+			// 无法找到新的主节点（略过），实际系统应有报警
 			continue
 		}
 
+		// 从故障节点移除该地图并更新元数据
 		failedNode.RemoveHostedMap(mapID)
 		c.owners[mapID] = nextOwnerID
 
+		// 选择新的副本节点
 		nextReplicaID := c.pickReplicaLocked(nextOwnerID)
 		c.replicas[mapID] = nextReplicaID
 
+		// 生成并保存新的 checkpoint，分发到新的 replica
 		if promoted := c.nodes[nextOwnerID]; promoted != nil {
 			if cp, err := promoted.Checkpoint(mapID); err == nil {
 				_ = c.store.SaveCheckpoint(cp)
@@ -889,6 +970,7 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 			}
 		}
 
+		// 更新在线会话的路由信息并准备把对应 profile 写回持久化
 		for _, session := range c.sessions {
 			if session.MapID != mapID {
 				continue
@@ -908,6 +990,7 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 	}
 	c.mu.Unlock()
 
+	// 将需要持久化的 profile 写回存储（异步化以减少主流程阻塞）
 	for _, item := range persistList {
 		_ = c.store.SaveProfile(item.profile)
 		_ = c.persistSessionState(item.username)
