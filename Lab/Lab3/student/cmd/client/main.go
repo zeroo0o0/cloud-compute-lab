@@ -98,6 +98,20 @@ func main() {
 		if err != nil {
 			return
 		}
+
+		// 输入流治理：拦截并截断鼠标滚轮产生的 ANSI 转义序列 (\033[M...)
+		if key == 27 { // 探测到 ESC (27)
+			if keyReader.Buffered() > 0 {
+				peek, _ := keyReader.Peek(1)
+				// 常见的鼠标报文序列以 ESC [ M 或 ESC [ < 开头
+				if peek[0] == '[' || peek[0] == 'M' {
+					// 瞬间丢弃缓冲区内所有字节，清空当前鼠标乱码序列
+					keyReader.Discard(keyReader.Buffered())
+					continue
+				}
+			}
+		}
+
 		if key == 3 {
 			_ = conn.Send(protocol.Message{Type: protocol.TypeLogout})
 			return

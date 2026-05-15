@@ -2,7 +2,7 @@
   "map_id": "green",
   "node_id": "node-a",
   "term": 0,
-  "version": 8641,
+  "version": 32523,
   "terrain": [
     "########################################################",
     "#.........................#............................#",
@@ -34,64 +34,44 @@
       "username": "ppp",
       "map_id": "green",
       "x": 54,
-      "y": 19,
+      "y": 1,
       "hp": 120,
       "max_hp": 120,
       "attack": 35,
       "potions": 4,
-      "treasures": 12,
+      "treasures": 21,
       "kills": 1,
-      "deaths": 10,
+      "deaths": 16,
       "victories": 1,
       "alive": true,
       "respawn_in": 0,
-      "last_update": "2026-05-15T08:04:46+08:00"
+      "last_update": "2026-05-15T08:34:49+08:00"
     },
     {
       "username": "zero",
       "map_id": "green",
-      "x": 40,
-      "y": 21,
+      "x": 53,
+      "y": 1,
       "hp": 120,
       "max_hp": 120,
       "attack": 35,
       "potions": 3,
-      "treasures": 79,
-      "kills": 2,
-      "deaths": 7,
+      "treasures": 99,
+      "kills": 8,
+      "deaths": 11,
       "victories": 1,
       "alive": true,
       "respawn_in": 0,
-      "last_update": "2026-05-15T08:01:36+08:00"
+      "last_update": "2026-05-15T08:53:47+08:00"
     }
   ],
   "npcs": [
     {
-      "id": "green-npc-0",
-      "name": "史莱姆",
-      "x": 6,
-      "y": 2,
-      "hp": 97,
-      "max_hp": 90,
-      "attack": 18,
-      "alive": true
-    },
-    {
-      "id": "green-npc-3",
-      "name": "宝匣怪",
-      "x": 11,
-      "y": 16,
-      "hp": 75,
-      "max_hp": 90,
-      "attack": 18,
-      "alive": true
-    },
-    {
-      "id": "green-npc-4",
-      "name": "石像魔",
-      "x": 4,
-      "y": 2,
-      "hp": 77,
+      "id": "green-npc-11",
+      "name": "潜行兽",
+      "x": 5,
+      "y": 1,
+      "hp": 82,
       "max_hp": 90,
       "attack": 18,
       "alive": true
@@ -99,9 +79,9 @@
     {
       "id": "green-npc-6",
       "name": "史莱姆",
-      "x": 4,
-      "y": 6,
-      "hp": 79,
+      "x": 7,
+      "y": 17,
+      "hp": 96,
       "max_hp": 90,
       "attack": 18,
       "alive": true
@@ -109,8 +89,28 @@
     {
       "id": "green-npc-7",
       "name": "荒原狼",
-      "x": 24,
-      "y": 9,
+      "x": 9,
+      "y": 2,
+      "hp": 90,
+      "max_hp": 90,
+      "attack": 18,
+      "alive": true
+    },
+    {
+      "id": "green-npc-8",
+      "name": "流寇",
+      "x": 16,
+      "y": 18,
+      "hp": 38,
+      "max_hp": 90,
+      "attack": 18,
+      "alive": true
+    },
+    {
+      "id": "green-npc-9",
+      "name": "宝匣怪",
+      "x": 3,
+      "y": 6,
       "hp": 91,
       "max_hp": 90,
       "attack": 18,
@@ -119,23 +119,37 @@
   ],
   "treasures": [
     {
-      "id": "green-t-17",
-      "kind": "野外宝箱",
-      "x": 20,
-      "y": 2,
-      "value": 4
-    },
-    {
-      "id": "green-t-20",
+      "id": "green-t-10",
       "kind": "野外宝箱",
       "x": 53,
-      "y": 3,
+      "y": 22,
       "value": 2
     },
     {
-      "id": "green-t-21",
+      "id": "green-t-11",
       "kind": "野外宝箱",
       "x": 52,
+      "y": 21,
+      "value": 3
+    },
+    {
+      "id": "green-t-14",
+      "kind": "野外宝箱",
+      "x": 10,
+      "y": 1,
+      "value": 1
+    },
+    {
+      "id": "green-t-15",
+      "kind": "野外宝箱",
+      "x": 9,
+      "y": 2,
+      "value": 1
+    },
+    {
+      "id": "green-t-17",
+      "kind": "野外宝箱",
+      "x": 20,
       "y": 2,
       "value": 4
     },
@@ -147,33 +161,19 @@
       "value": 2
     },
     {
-      "id": "green-t-34",
-      "kind": "野外宝箱",
-      "x": 36,
-      "y": 22,
-      "value": 3
-    },
-    {
       "id": "green-t-35",
       "kind": "野外宝箱",
       "x": 54,
       "y": 20,
-      "value": 3
-    },
-    {
-      "id": "green-t-8",
-      "kind": "野外宝箱",
-      "x": 53,
-      "y": 1,
-      "value": 3
+      "value": 8
     },
     {
       "id": "green-t-9",
       "kind": "野外宝箱",
-      "x": 52,
-      "y": 5,
-      "value": 2
+      "x": 54,
+      "y": 19,
+      "value": 3
     }
   ],
-  "checkpoint": "2026-05-15T08:04:55.326910634+08:00"
+  "checkpoint": "2026-05-15T09:06:59.275137889+08:00"
 }

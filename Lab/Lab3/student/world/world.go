@@ -141,12 +141,12 @@ func (w *World) AddOrRestorePlayer(profile *protocol.UserProfile) protocol.Playe
 		Alive:      profile.Alive,
 		LastUpdate: time.Now(),
 	}
-	if profile.HP == 0 && !profile.Alive {
-		player.Alive = false
-	}
-	if player.HP <= 0 {
-		player.HP = player.MaxHP
-		player.Alive = true
+	if !player.Alive {
+		// 如果加载的是死亡状态，且没有设置复活时间（通常是刚从持久化恢复），
+		// 则立即计算一个新的复活时间，防止其因 RespawnAt 为零而永远无法复活。
+		if player.RespawnAt.IsZero() {
+			player.RespawnAt = time.Now().Add(3 * time.Second)
+		}
 	}
 	w.players[player.Username] = player
 	w.version++

@@ -4,21 +4,21 @@
     "map_id": "green",
     "node_id": "node-a",
     "x": 54,
-    "y": 19,
+    "y": 1,
     "hp": 120,
-    "treasures": 12,
-    "session_version": 407,
-    "updated_at": "2026-05-15T08:04:55.324966141+08:00"
+    "treasures": 21,
+    "session_version": 112,
+    "updated_at": "2026-05-15T08:34:47.399320158+08:00"
   },
   "zero": {
     "username": "zero",
     "map_id": "green",
     "node_id": "node-a",
-    "x": 40,
-    "y": 21,
+    "x": 53,
+    "y": 1,
     "hp": 120,
-    "treasures": 79,
-    "session_version": 316,
-    "updated_at": "2026-05-15T08:04:55.32353392+08:00"
+    "treasures": 99,
+    "session_version": 227,
+    "updated_at": "2026-05-15T09:06:59.27410977+08:00"
   }
 }
