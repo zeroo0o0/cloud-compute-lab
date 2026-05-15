@@ -1,0 +1,80 @@
+# Cluster Autoscaler 模拟说明
+# =============================
+#
+# minikube 是单节点集群，无法真正模拟 Cluster Autoscaler 的"自动买机器"行为。
+# 以下配置适用于真实云环境（阿里云 ACK / AWS EKS / GCP GKE）。
+#
+# === 真实云环境部署 ===
+#
+# 1. 阿里云 ACK:
+#    - 在集群配置中开启 "节点自动伸缩"
+#    - 设置节点池最小/最大实例数
+#    - kubectl apply -f cluster-autoscaler-aliyun.yaml
+#
+# 2. AWS EKS:
+#    - 安装 cluster-autoscaler:
+#      kubectl apply -f https://raw.githubusercontent.com/kubernetes/autoscaler/master/cluster-autoscaler/cloudprovider/aws/examples/cluster-autoscaler-autodiscover.yaml
+#    - 添加 IAM 角色和 Auto Scaling Group 标签
+#
+# 3. GCP GKE:
+#    - gcloud container clusters update <cluster> --enable-autoscaling --min-nodes=1 --max-nodes=10
+#
+# === minikube 本地模拟方案 ===
+#
+# 本实验在 minikube 中通过以下方式模拟演示:
+# 1. 使用 HPA 自动扩缩 Pod 数量（已配置 hpa.yaml）
+# 2. 通过压测脚本制造 CPU 负载，触发 HPA 扩容
+# 3. 使用 "kubectl scale" 手动模拟节点扩容
+# 4. 观察 Pod Pending 状态（当资源不足时）
+#
+# 模拟步骤:
+#   # 1. 部署服务
+#   kubectl apply -f k8s/game-deployment.yaml
+#   kubectl apply -f k8s/game-service.yaml
+#   kubectl apply -f k8s/hpa.yaml
+#
+#   # 2. 安装 metrics-server (minikube)
+#   minikube addons enable metrics-server
+#
+#   # 3. 查看当前状态
+#   kubectl get pods -o wide
+#   kubectl get nodes
+#
+#   # 4. 压测触发 HPA
+#   go run cmd/loadtest/main.go -target http://$(minikube ip):30080 -c 20 -d 120s
+#
+#   # 5. 观察 HPA 扩容
+#   watch kubectl get hpa
+#   watch kubectl get pods
+#
+#   # 6. 停止压测后观察缩容（需要等待几分钟冷却时间）
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game-service-large
+  labels:
+    app: game-service-large
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: game-service-large
+  template:
+    metadata:
+      labels:
+        app: game-service-large
+    spec:
+      containers:
+      - name: game
+        image: ch6-exp9-game:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: "900m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
