@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: battleworld-config
+  namespace: battleworld
+data:
+  ROLE: "all"
+  GATEWAY_ADDR: "0.0.0.0:9310"
+  NODE_ADDRS: "node-a=127.0.0.1:9311,node-b=127.0.0.1:9312,node-c=127.0.0.1:9313"
+  MAP_ASSIGNMENTS: "green=node-a:node-c,cave=node-b:node-c,ruins=node-a:node-b"
+  NODE_MODE: "local"
+  LAB3_DATA_ROOT: "/data"

@@ -1,0 +1,66 @@
+# Phase 2: 网关独立部署（微服务模式）
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: battleworld-gateway-config
+  namespace: battleworld
+data:
+  ROLE: "gateway"
+  NODE_MODE: "remote"
+  GATEWAY_ADDR: "0.0.0.0:9310"
+  NODE_ADDRS: "node-a=battleworld-node-0.battleworld-nodes:9311,node-b=battleworld-node-1.battleworld-nodes:9312,node-c=battleworld-node-2.battleworld-nodes:9313"
+  MAP_ASSIGNMENTS: "green=node-a:node-c,cave=node-b:node-c,ruins=node-a:node-b"
+  LAB3_DATA_ROOT: "/data"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: battleworld-gateway
+  namespace: battleworld
+  labels:
+    role: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      role: gateway
+  template:
+    metadata:
+      labels:
+        role: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: battleworld:latest
+          imagePullPolicy: Never
+          command: ["gateway"]
+          ports:
+            - containerPort: 9310
+              name: gateway
+          envFrom:
+            - configMapRef:
+                name: battleworld-gateway-config
+          readinessProbe:
+            tcpSocket:
+              port: 9310
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 9310
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: battleworld-data
