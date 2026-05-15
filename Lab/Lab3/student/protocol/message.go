@@ -186,6 +186,7 @@ type HotSession struct {
 type MapCheckpoint struct {
 	MapID      string         `json:"map_id"`
 	NodeID     string         `json:"node_id"`
+	Term       int64          `json:"term"` // 任期号，用于 Fencing 校验
 	Version    int64          `json:"version"`
 	Terrain    []string       `json:"terrain"`
 	Players    []PlayerView   `json:"players"`

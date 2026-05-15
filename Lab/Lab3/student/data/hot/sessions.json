@@ -1,1 +1,24 @@
-{}
+{
+  "ppp": {
+    "username": "ppp",
+    "map_id": "green",
+    "node_id": "node-a",
+    "x": 54,
+    "y": 19,
+    "hp": 120,
+    "treasures": 12,
+    "session_version": 407,
+    "updated_at": "2026-05-15T08:04:55.324966141+08:00"
+  },
+  "zero": {
+    "username": "zero",
+    "map_id": "green",
+    "node_id": "node-a",
+    "x": 40,
+    "y": 21,
+    "hp": 120,
+    "treasures": 79,
+    "session_version": 316,
+    "updated_at": "2026-05-15T08:04:55.32353392+08:00"
+  }
+}

@@ -14,13 +14,14 @@ import (
 )
 
 type Store struct {
-	mu            sync.Mutex
-	baseDir       string
-	usersFile     string
-	hotFile       string
-	checkpointDir string
-	users         map[string]protocol.UserProfile
-	sessions      map[string]protocol.HotSession
+	mu             sync.Mutex
+	baseDir        string
+	usersFile      string
+	hotFile        string
+	checkpointDir  string
+	users          map[string]protocol.UserProfile
+	sessions       map[string]protocol.HotSession
+	checkpointTerm map[string]int64 // 记录每个地图已保存的最大 Term
 }
 
 func NewStore(baseDir string) (*Store, error) {
@@ -38,12 +39,13 @@ func NewStore(baseDir string) (*Store, error) {
 	}
 
 	s := &Store{
-		baseDir:       baseDir,
-		usersFile:     usersFile,
-		hotFile:       hotFile,
-		checkpointDir: checkpointDir,
-		users:         make(map[string]protocol.UserProfile),
-		sessions:      make(map[string]protocol.HotSession),
+		baseDir:        baseDir,
+		usersFile:      usersFile,
+		hotFile:        hotFile,
+		checkpointDir:  checkpointDir,
+		users:          make(map[string]protocol.UserProfile),
+		sessions:       make(map[string]protocol.HotSession),
+		checkpointTerm: make(map[string]int64),
 	}
 	if err := s.loadJSON(usersFile, &s.users); err != nil {
 		return nil, err
@@ -140,6 +142,12 @@ func (s *Store) DeleteHotSession(username string) error {
 func (s *Store) SaveCheckpoint(cp protocol.MapCheckpoint) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Term 校验：只接受大于或等于当前已存 Term 的快照
+	if cp.Term < s.checkpointTerm[cp.MapID] {
+		return fmt.Errorf("拒绝旧任期的快照写入: 收到 %d, 当前 %d", cp.Term, s.checkpointTerm[cp.MapID])
+	}
+	s.checkpointTerm[cp.MapID] = cp.Term
 
 	path := filepath.Join(s.checkpointDir, cp.MapID+".json")
 	return writeJSONAtomic(path, cp)

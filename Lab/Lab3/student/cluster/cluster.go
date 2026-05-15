@@ -55,6 +55,7 @@ type NodeService struct {
 	Addr             string
 	healthy          bool
 	lastHeartbeat    time.Time
+	term             int64 // 当前节点被授予的任期号
 	maps             map[string]*world.World
 	replicaSnapshots map[string]protocol.MapCheckpoint
 	ln               net.Listener
@@ -91,6 +92,7 @@ type Cluster struct {
 	replicas map[string]string
 	configs  map[string]world.MapConfig
 	boss     *BossState
+	term     int64 // 全局任期号，用于防止脑裂的 Fencing 机制
 	stopCh   chan struct{}
 }
 
@@ -613,8 +615,8 @@ func (c *Cluster) sessionNode(username string) (*Session, *NodeService, error) {
 		return nil, nil, fmt.Errorf("用户 %q 当前不在线", username)
 	}
 	node := c.nodes[session.NodeID]
-	if node == nil || !node.IsLeaseValid() {
-		return nil, nil, fmt.Errorf("节点 %q 租约已过期或不可用", session.NodeID)
+	if node == nil || !node.IsHealthy() {
+		return nil, nil, fmt.Errorf("节点 %q 当前不可用", session.NodeID)
 	}
 	copySession := *session
 	return &copySession, node, nil
@@ -690,9 +692,9 @@ func (c *Cluster) persistSessionState(username string) error {
 	node := c.nodes[nodeID]
 	c.mu.RUnlock()
 
-	// 如果承载节点不可用或租约失效，应当返回错误，由调用方决定是否重试或记录告警。
-	if node == nil || !node.IsLeaseValid() {
-		return fmt.Errorf("节点 %q 当前不可用或租约已过期", nodeID)
+	// 如果承载节点不可用，应当返回错误
+	if node == nil || !node.IsHealthy() {
+		return fmt.Errorf("节点 %q 当前不可用", nodeID)
 	}
 
 	profile, ok := node.Profile(mapID, username)
@@ -923,10 +925,14 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 		nextOwnerID := ""
 		replicaID := c.replicas[mapID]
 
+		// 提升新主前增加全局 Term
+		c.term++
+		currentTerm := c.term
+
 		// 优先选择已有的 replica（如果健康并能 promote）
 		if replicaID != "" {
 			if replica := c.nodes[replicaID]; replica != nil && replica.IsHealthy() {
-				if err := replica.Promote(mapID, cfg); err == nil {
+				if err := replica.Promote(mapID, cfg, currentTerm); err == nil {
 					nextOwnerID = replicaID
 				}
 			}
@@ -937,11 +943,14 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 			candidateID := c.pickReplicaLocked(nodeID)
 			if candidateID != "" {
 				candidate := c.nodes[candidateID]
-				if err := candidate.Promote(mapID, cfg); err == nil {
+				if err := candidate.Promote(mapID, cfg, currentTerm); err == nil {
 					nextOwnerID = candidateID
 				} else if cp, ok := c.store.LoadCheckpoint(mapID); ok {
 					// 使用持久化快照恢复到 candidate 上
 					candidate.RestorePrimaryMap(cfg, *cp)
+					candidate.mu.Lock()
+					candidate.term = currentTerm
+					candidate.mu.Unlock()
 					nextOwnerID = candidateID
 				}
 			}
@@ -1314,11 +1323,14 @@ func (n *NodeService) Counts(mapID string) (int, int, int, int64, error) {
 func (n *NodeService) Checkpoint(mapID string) (protocol.MapCheckpoint, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
+	currentTerm := n.term
 	n.mu.RUnlock()
 	if instance == nil {
 		return protocol.MapCheckpoint{}, fmt.Errorf("地图 %q 当前不在节点 %s 上", mapID, n.ID)
 	}
-	return instance.CaptureCheckpoint(n.ID), nil
+	cp := instance.CaptureCheckpoint(n.ID)
+	cp.Term = currentTerm // 将节点的当前任期注入快照
+	return cp, nil
 }
 
 func (n *NodeService) BackgroundStep() []MapEvents {
@@ -1351,7 +1363,7 @@ func (n *NodeService) StoreReplica(cp protocol.MapCheckpoint) {
 	n.replicaSnapshots[cp.MapID] = cp
 }
 
-func (n *NodeService) Promote(mapID string, cfg world.MapConfig) error {
+func (n *NodeService) Promote(mapID string, cfg world.MapConfig, term int64) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -1362,6 +1374,7 @@ func (n *NodeService) Promote(mapID string, cfg world.MapConfig) error {
 	instance := world.NewWorld(cfg)
 	instance.RestoreCheckpoint(cp)
 	n.maps[mapID] = instance
+	n.term = term // 更新节点任期号
 	delete(n.replicaSnapshots, mapID)
 	return nil
 }
@@ -1395,14 +1408,6 @@ func (n *NodeService) IsHealthy() bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.healthy
-}
-
-func (n *NodeService) IsLeaseValid() bool {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-	// 租约硬校验：如果该节点超过 3.5 秒未更新心跳，网关认为其处于“僵死”边缘
-	// 拒绝通过该节点执行写操作，防止此时副本已上位造成的脑裂
-	return n.healthy && time.Since(n.lastHeartbeat) < 3500*time.Millisecond
 }
 
 func (n *NodeService) SetHealthy(healthy bool) bool {
