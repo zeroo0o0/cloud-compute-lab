@@ -1,0 +1,5 @@
+FROM scratch
+
+ARG SERVICE
+COPY exp7/dist/${SERVICE} /app/${SERVICE}
+USER 65532:65532

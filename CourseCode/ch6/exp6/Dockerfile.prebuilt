@@ -1,0 +1,4 @@
+FROM scratch
+
+COPY exp6/dist/game /app/game
+USER 65532:65532
