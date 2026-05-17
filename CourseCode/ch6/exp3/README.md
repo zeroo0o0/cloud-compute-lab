@@ -8,36 +8,48 @@
 
 ## 前置条件
 
-先完成实验四，并发送一次请求生成日志：
+先进入 `exp1` 目录构建三层镜像：
 
-```powershell
-cd E:\work\cloud-compute-book-code\CourseCode\ch6\exp4
-docker compose up -d
+```bash
+cd /mnt/e/work/cloud-compute-book-code/CourseCode/ch6/exp1
+docker build -f docker/storage.Dockerfile -t game-storage:v1.0 .
+docker build -f docker/game.Dockerfile -t game-service:v1.0 .
 ```
 
-```powershell
-@'
-$client = [System.Net.Sockets.TcpClient]::new()
-$client.Connect('127.0.0.1', 18080)
-$stream = $client.GetStream()
-$writer = New-Object System.IO.StreamWriter($stream)
-$writer.NewLine = "`n"
-$writer.AutoFlush = $true
-$writer.WriteLine('MOVE demo-user d')
-$reader = New-Object System.IO.StreamReader($stream)
-while (($line = $reader.ReadLine()) -ne $null) {
-  if ($line -eq '') { break }
-  $line
-}
-$reader.Dispose(); $writer.Dispose(); $stream.Dispose(); $client.Dispose()
-'@ | powershell
+以下步骤以 Linux / WSL 为主，不依赖实验四。
+
+```bash
+cd /mnt/e/work/cloud-compute-book-code/CourseCode/ch6/exp1
+docker rm -f game-service storage >/dev/null 2>&1 || true
+docker network rm game-network >/dev/null 2>&1 || true
+docker volume rm game-data >/dev/null 2>&1 || true
+docker network create game-network
+docker run -d --name storage --network game-network \
+  -e STORAGE_ADDR=0.0.0.0:8082 \
+  -e STORAGE_LOG_PATH=/app/data/players.log \
+  -v game-data:/app/data \
+  game-storage:v1.0
+docker run -d --name game-service --network game-network \
+  -e GAME_ADDR=0.0.0.0:8081 \
+  -e STORAGE_URL=http://storage:8082 \
+  -v game-data:/app/data \
+  -p 8081:8081 \
+  game-service:v1.0
+```
+
+发送一次请求生成日志：
+
+```bash
+curl -X POST "http://127.0.0.1:8081/move" \
+  -H "Content-Type: application/json" \
+  -d '{"playerId":"demo-user","dx":1,"dy":0}'
 ```
 
 ## 命令
 
 交互进入：
 
-```powershell
+```bash
 docker exec -it game-service /bin/sh
 ```
 
@@ -54,13 +66,17 @@ exit
 
 单次执行：
 
-```powershell
+```bash
 docker exec game-service ps aux
 docker exec game-service netstat -tlnp
 docker exec game-service ifconfig
 docker exec game-service ping -c 1 storage
 docker exec game-service cat /app/data/players.log
 ```
+
+## Windows PowerShell 补充
+
+如在 Windows PowerShell 中演示，可使用与上面相同的容器命名和端口，仅将目录切换与 JSON 请求改写为 PowerShell 语法。
 
 ## 预期
 

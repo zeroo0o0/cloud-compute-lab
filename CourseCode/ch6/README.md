@@ -43,12 +43,34 @@ ch6/
 | Docker Compose | 使用 `docker compose` 子命令 |
 | Go | 用于运行 `exp1/cmd/env_demo` |
 
-执行前建议确认：
+建议以 `WSL2 / Ubuntu` 作为主环境，`Windows PowerShell` 作为补充。
+
+Linux / WSL 建议先确认：
+
+```bash
+docker version
+docker compose version
+go version
+```
+
+Windows PowerShell 可补充确认：
 
 ```powershell
 docker version
 docker compose version
 go version
+```
+
+如遇 Docker 代理问题，可先清理环境变量：
+
+```bash
+unset HTTP_PROXY HTTPS_PROXY NO_PROXY
+```
+
+如遇 `docker build` 证书或代理配置异常，可暂时移走 Docker CLI 配置：
+
+```bash
+mv ~/.docker/config.json ~/.docker/config.json.bak
 ```
 
 ---
@@ -68,8 +90,8 @@ go version
 
 1. 在 `exp1` 完成宿主机失败与容器成功，并构建全部镜像。
 2. 在 `exp2` 使用宿主机目录挂载，验证日志持久化。
-3. 在 `exp4` 启动三层服务。
-4. 在 `exp3` 进入 `game-service` 容器执行排查命令。
+3. 在 `exp3` 独立启动 `storage` 与 `game-service`，完成容器内排查。
+4. 在 `exp4` 使用 Compose 完成单机多容器编排。
 
 ---
 
@@ -78,5 +100,5 @@ go version
 - `game-map0:v1.0` 使用宿主机端口 `8081`，容器端口 `8080`。
 - `gateway` 默认使用宿主机端口 `18080`，容器端口 `8080`。
 - 实验二开始前，如存在旧的 `game-0` 容器，应先移除。
-- 实验三前，应先由实验四启动三层服务，并至少发送一次 `MOVE` 请求，确保生成 `players.log`。
+- 实验三不依赖实验四；如存在旧的 `storage`、`game-service`、`gateway`、`game-network`、`game-data`，应先清理。
 - 实验四默认直接使用实验一已构建的镜像；如需重新构建，可手动执行 `docker compose build`。
