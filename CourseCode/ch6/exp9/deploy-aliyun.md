@@ -22,10 +22,10 @@ cd CourseCode/ch6/exp9
 docker build -t ch6-exp9-game:latest .
 
 # 打 ACR 标签（替换为你的命名空间）
-docker tag ch6-exp9-game:latest registry.cn-shanghai.aliyuncs.com/cloud-lab/ch6-exp9-game:latest
+docker tag ch6-exp9-game:latest crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp9-game:latest
 
 # 推送
-docker push registry.cn-shanghai.aliyuncs.com/cloud-lab/ch6-exp9-game:latest
+docker push crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp9-game:latest
 ```
 
 ## 三、修改 K8s 配置
@@ -54,7 +54,7 @@ spec:
     spec:
       containers:
       - name: game
-        image: registry.cn-shanghai.aliyuncs.com/cloud-lab/ch6-exp9-game:latest
+        image: crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp9-game:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -119,9 +119,27 @@ spec:
       target:
         type: Utilization
         averageUtilization: 50
+  # === 演示加速配置 ===
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0    # 不等待稳定窗口，立即扩容
+      policies:
+      - type: Pods
+        value: 4                        # 每次最多增加 4 个 Pod
+        periodSeconds: 15               # 每 15 秒可执行一次
+    scaleDown:
+      stabilizationWindowSeconds: 30    # 缩容冷却从 5 分钟降到 30 秒
+      policies:
+      - type: Percent
+        value: 100                      # 允许一次性缩到最小
+        periodSeconds: 30               # 每 30 秒可执行一次
 ```
 
 > `maxReplicas` 设为 6 而非 10，因为 3 节点 × 2 Pod/节点 = 6，避免资源争抢影响其他实验。
+>
+> `behavior` 字段是演示加速的关键配置：
+> - `scaleUp.stabilizationWindowSeconds: 0` — 扩容不等待，CPU 超标立即触发
+> - `scaleDown.stabilizationWindowSeconds: 30` — 缩容冷却从默认 5 分钟降到 30 秒
 
 ## 四、部署
 
@@ -206,22 +224,43 @@ kubectl -n exp9 get pods -o wide
 ### 5.5 观察缩容
 
 ```bash
-# 停止压测后，等待 5 分钟冷却时间
+# 停止压测后，等待约 30 秒冷却时间（已通过 behavior 配置加速）
 # HPA 会自动缩减 Pod 数量
-watch -n 5 kubectl -n exp9 get pods
+watch -n 2 kubectl -n exp9 get pods
 ```
 
-## 六、预期结果
+## 六、预期结果（演示加速后）
 
-| 阶段 | Pod 数 | CPU 使用率 | 观察 |
-|------|--------|-----------|------|
-| 初始 | 1 | ~0% | 单 Pod 空闲 |
-| 压测开始 | 1 | >100% | CPU 打满 |
-| 扩容中 | 2→3→4 | ~50% | HPA 自动增加 Pod |
-| 扩容稳定 | 4-6 | ~50% | 负载均匀分布 |
-| 停止压测 | 4-6 | ~0% | CPU 空闲 |
-| 缩容中 | 4→2→1 | ~0% | 5 分钟冷却后缩容 |
-| 缩容完成 | 1 | ~0% | 回到初始状态 |
+### 扩容时间线
+
+| 时间 | 事件 | Pod 数 |
+|------|------|--------|
+| 0s | 压测开始，CPU 瞬间打满 | 1 |
+| 15s | HPA 检测到 CPU > 50%，触发扩容 | 1→4 |
+| 30s | 新 Pod 就绪，负载分散 | 4 |
+| 45s | CPU 仍高，继续扩容 | 4→6 |
+| 60s | 负载均衡，CPU 降至 50% 以下 | 6（稳定） |
+
+### 缩容时间线
+
+| 时间 | 事件 | Pod 数 |
+|------|------|--------|
+| 0s | 停止压测，CPU 降至 ~0% | 6 |
+| 15s | HPA 检测到 CPU < 50% | 6 |
+| 30s | 冷却窗口结束，触发缩容 | 6→1 |
+| 45s | 多余 Pod 终止 | 1（恢复） |
+
+> **演示关键**：优化后扩容 ~15-30 秒可见，缩容 ~30-45 秒可见。
+> 对比默认配置：扩容 30-50 秒，缩容 5-8 分钟。
+
+### 未优化 vs 优化对比
+
+| 配置项 | 默认值 | 优化值 | 效果 |
+|--------|--------|--------|------|
+| `stabilizationWindowSeconds` (down) | 300s (5分钟) | 30s | 缩容等待从 5 分钟降到 30 秒 |
+| `stabilizationWindowSeconds` (up) | 0s | 0s | 扩容本身已经很快 |
+| readinessProbe `initialDelaySeconds` | 2s | 1s | Pod 更快标记为就绪 |
+| readinessProbe `periodSeconds` | 5s | 2s | 探测更频繁 |
 
 ## 七、清理
 

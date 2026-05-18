@@ -23,8 +23,8 @@ cd CourseCode/ch6/exp11
 docker build -t ch6-exp11-game:latest .
 
 # 推送 ACR
-docker tag ch6-exp11-game:latest registry.cn-shanghai.aliyuncs.com/cloud-lab/ch6-exp11-game:latest
-docker push registry.cn-shanghai.aliyuncs.com/cloud-lab/ch6-exp11-game:latest
+docker tag ch6-exp11-game:latest crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp11-game:latest
+docker push crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp11-game:latest
 ```
 
 ## 三、修改 K8s 配置
@@ -52,7 +52,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: game
-        image: registry.cn-shanghai.aliyuncs.com/cloud-lab/ch6-exp11-game:latest
+        image: crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp11-game:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080

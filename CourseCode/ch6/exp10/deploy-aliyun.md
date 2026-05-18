@@ -30,8 +30,8 @@ cd CourseCode/ch6/exp10
 docker build -t ch6-exp10-runtime:latest .
 
 # 推送 ACR
-docker tag ch6-exp10-runtime:latest registry.cn-shanghai.aliyuncs.com/cloud-lab/ch6-exp10-runtime:latest
-docker push registry.cn-shanghai.aliyuncs.com/cloud-lab/ch6-exp10-runtime:latest
+docker tag ch6-exp10-runtime:latest crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp10-runtime:latest
+docker push crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp10-runtime:latest
 ```
 
 ### A.3 修改 K8s 配置
@@ -58,7 +58,7 @@ spec:
     spec:
       containers:
       - name: runtime
-        image: registry.cn-shanghai.aliyuncs.com/cloud-lab/ch6-exp10-runtime:latest
+        image: crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp10-runtime:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 9000
