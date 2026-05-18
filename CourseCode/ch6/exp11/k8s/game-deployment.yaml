@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: game-service
+  namespace: exp11
   labels:
     app: game-service
 spec:
@@ -17,8 +18,8 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: game
-        image: ch6-exp11-game:latest
-        imagePullPolicy: Never
+        image: crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp11-game:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8080
         env:

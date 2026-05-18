@@ -2,6 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: game-service
+  namespace: exp11
 spec:
   type: NodePort
   selector:

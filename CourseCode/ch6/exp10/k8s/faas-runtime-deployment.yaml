@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: faas-runtime
+  namespace: exp10
   labels:
     app: faas-runtime
 spec:
@@ -16,8 +17,8 @@ spec:
     spec:
       containers:
       - name: runtime
-        image: ch6-exp10-runtime:latest
-        imagePullPolicy: Never
+        image: crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp10-runtime:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 9000
         env:

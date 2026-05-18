@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: battleworld
-  namespace: battleworld
+  namespace: Lab4
   labels:
     app: battleworld
 spec:
@@ -17,8 +17,8 @@ spec:
     spec:
       containers:
         - name: server
-          image: battleworld:latest
-          imagePullPolicy: Never
+          image: crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/lab4-battleworld:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 9310
               name: gateway

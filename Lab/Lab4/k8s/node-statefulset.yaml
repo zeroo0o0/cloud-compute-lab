@@ -3,7 +3,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: battleworld-node-config
-  namespace: battleworld
+  namespace: Lab4
 data:
   ROLE: "node"
   NODE_ADDR: "0.0.0.0:9311"
@@ -14,7 +14,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: battleworld-node
-  namespace: battleworld
+  namespace: Lab4
   labels:
     role: game-node
 spec:
@@ -30,8 +30,8 @@ spec:
     spec:
       containers:
         - name: node
-          image: battleworld:latest
-          imagePullPolicy: Never
+          image: crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/lab4-battleworld:latest
+          imagePullPolicy: Always
           command: ["node"]
           ports:
             - containerPort: 9311

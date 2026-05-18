@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: battleworld-gateway
-  namespace: battleworld
+  namespace: Lab4
   labels:
     app: battleworld
 spec:

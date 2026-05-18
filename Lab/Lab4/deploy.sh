@@ -1,79 +1,64 @@
 #!/bin/bash
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# === Lab4 部署脚本 ===
+# 用法: bash deploy.sh [phase] [ACR_PREFIX]
+# 示例: bash deploy.sh              # 默认部署 Phase 1
+#       bash deploy.sh phase1        # 部署 Phase 1（单体模式）
+#       bash deploy.sh phase2        # 部署 Phase 2（微服务模式）
 
-echo "=========================================="
-echo "  Lab4: 分布式战场云原生部署"
-echo "=========================================="
+PHASE="${1:-phase1}"
+ACR="${2:-crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute}"
+IMAGE="${ACR}/lab4-battleworld:latest"
+NAMESPACE="Lab4"
 
-# Step 1: 检查 minikube 状态
-echo ""
-echo "=== Step 1: 检查 minikube 状态 ==="
-if ! command -v minikube &> /dev/null; then
-    echo "错误: minikube 未安装"
-    echo "请先安装: https://minikube.sigs.k8s.io/docs/start/"
-    exit 1
-fi
+echo "=== 1. 构建镜像 (linux/amd64) ==="
+cd student
+docker build --platform linux/amd64 -t battleworld:latest .
+cd ..
 
-if ! minikube status &> /dev/null; then
-    echo "启动 minikube..."
-    minikube start --cpus=2 --memory=2048
-else
-    echo "minikube 已运行"
-fi
+echo "=== 2. 推送到 ACR ==="
+docker tag battleworld:latest "${IMAGE}"
+docker push "${IMAGE}"
 
-# Step 2: 切换 Docker 到 minikube
-echo ""
-echo "=== Step 2: 切换 Docker 到 minikube ==="
-eval $(minikube docker-env)
+echo "=== 3. 更新 YAML 中的镜像地址 ==="
+sed -i "s|image:.*battleworld.*|image: ${IMAGE}|g" k8s/*.yaml
+sed -i "s|imagePullPolicy: Never|imagePullPolicy: Always|g" k8s/*.yaml
 
-# Step 3: 构建 Docker 镜像
-echo ""
-echo "=== Step 3: 构建 Docker 镜像 ==="
-cd "$SCRIPT_DIR/student"
-docker build -t battleworld:latest -f Dockerfile .
-echo "镜像构建完成: battleworld:latest"
-
-# Step 4: 创建 K8s 资源
-echo ""
-echo "=== Step 4: 创建 K8s 资源 ==="
-cd "$SCRIPT_DIR"
+echo "=== 4. 部署 K8s 资源 ==="
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/configmap.yaml
 kubectl apply -f k8s/pvc.yaml
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
 
-# Step 5: 等待部署就绪
-echo ""
-echo "=== Step 5: 等待部署就绪 ==="
-kubectl -n battleworld rollout status deployment/battleworld --timeout=60s
+if [ "$PHASE" = "phase2" ]; then
+  echo "--- Phase 2: 微服务模式 ---"
+  kubectl -n "${NAMESPACE}" delete deployment battleworld 2>/dev/null || true
+  kubectl apply -f k8s/gateway-deployment.yaml
+  kubectl apply -f k8s/node-statefulset.yaml
+  kubectl apply -f k8s/headless-service.yaml
 
-# Step 6: 输出访问信息
+  echo "=== 5. 等待 Pod 就绪 ==="
+  kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l app=battleworld-gateway --timeout=120s
+  kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l app=battleworld-node --timeout=120s
+else
+  echo "--- Phase 1: 单体模式 ---"
+  kubectl apply -f k8s/deployment.yaml
+  kubectl apply -f k8s/service.yaml
+
+  echo "=== 5. 等待 Pod 就绪 ==="
+  kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l app=battleworld --timeout=120s
+fi
+
 echo ""
-echo "=========================================="
-echo "  部署完成！"
-echo "=========================================="
-NODE_IP=$(minikube ip)
-NODE_PORT=$(kubectl -n battleworld get svc battleworld-gateway -o jsonpath='{.spec.ports[0].nodePort}')
+echo "=== 部署完成 ==="
+kubectl -n "${NAMESPACE}" get pods
+kubectl -n "${NAMESPACE}" get svc
+
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}' 2>/dev/null)
+if [ -z "$NODE_IP" ]; then
+  NODE_IP="<任意节点公网IP>"
+fi
 echo ""
-echo "网关地址: ${NODE_IP}:${NODE_PORT}"
-echo ""
-echo "连接游戏:"
-echo "  cd Lab4/student"
-echo "  go run ./cmd/client"
-echo "  选择 2. 连接指定网关"
-echo "  IP: ${NODE_IP}"
-echo "  端口: ${NODE_PORT}"
-echo ""
-echo "管理命令:"
-echo "  cd Lab4/student"
-echo "  go run ./cmd/admin 状态 ${NODE_IP}:${NODE_PORT}"
-echo ""
-echo "验证部署:"
-echo "  bash verify.sh"
-echo ""
-echo "清理资源:"
-echo "  bash undeploy.sh"
-echo "=========================================="
+echo "访问地址: ${NODE_IP}:30310"
+echo "连接游戏: cd student && go run ./cmd/client → 选择 2 → IP: ${NODE_IP} → 端口: 30310"
+echo "管理命令: cd student && go run ./cmd/admin 状态 ${NODE_IP}:30310"

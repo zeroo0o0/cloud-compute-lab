@@ -8,6 +8,8 @@
 
 演示即使程序出现 Bug 导致进程假死，K8s 的 Liveness Probe 也能自动检测并重启容器，实现"永不宕机"。
 
+> 详细部署指南见 [deploy-aliyun.md](deploy-aliyun.md)。
+
 ## 目录结构
 
 ```
@@ -17,49 +19,72 @@ exp11/
 │       └── main.go          # Game 服务：/health, /deadlock, /recover 接口
 ├── k8s/
 │   ├── game-deployment.yaml # Deployment (含 Liveness Probe)
-│   └── game-service.yaml    # NodePort Service (30080)
+│   └── game-service.yaml    # NodePort Service (30081)
 ├── Dockerfile
+├── deploy.sh                # 一键部署脚本
+├── deploy-aliyun.md         # 阿里云部署指南
 ├── go.mod
 └── README.md
 ```
 
-## 运行步骤
+## 前置条件
 
-### 步骤 1：构建镜像
+- 已完成 [集群搭建](../cluster-setup/README.md)
+
+## 快速部署
 
 ```bash
 cd CourseCode/ch6/exp11
-eval $(minikube docker-env)
-docker build -t ch6-exp11-game:latest .
+
+# 一键部署
+bash deploy.sh
+```
+
+## 手动部署
+
+### 步骤 1：构建并推送镜像
+
+```bash
+cd CourseCode/ch6/exp11
+
+# 构建镜像
+docker build --platform linux/amd64 -t ch6-exp11-game:latest .
+
+# 推送到 ACR
+docker tag ch6-exp11-game:latest crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp11-game:latest
+docker push crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp11-game:latest
 ```
 
 ### 步骤 2：部署服务
 
 ```bash
+kubectl create namespace exp11
 kubectl apply -f k8s/
 ```
 
 ### 步骤 3：验证正常运行
 
 ```bash
+export NODE_IP=<任意节点公网IP>
+
 # 查看 Pod 状态（应该显示 Running, RESTARTS: 0）
-kubectl get pods -l app=game-service
+kubectl -n exp11 get pods
 
 # 访问健康接口
-curl http://$(minikube ip):30080/health
+curl http://$NODE_IP:30081/health
 
 # 查看服务状态
-curl http://$(minikube ip):30080/status
+curl http://$NODE_IP:30081/status
 ```
 
 ### 步骤 4：模拟进程假死（制造车祸）
 
 ```bash
 # 发送死锁指令，让 /health 返回 500
-curl -X POST http://$(minikube ip):30080/deadlock
+curl -X POST http://$NODE_IP:30081/deadlock
 
 # 验证服务已不健康
-curl http://$(minikube ip):30080/health
+curl http://$NODE_IP:30081/health
 # 应该返回 500 + {"status":"unhealthy"}
 ```
 
@@ -67,7 +92,7 @@ curl http://$(minikube ip):30080/health
 
 ```bash
 # 持续观察 Pod 状态
-watch kubectl get pods -l app=game-service
+watch -n 1 kubectl -n exp11 get pods
 
 # 约 15 秒后（periodSeconds=5 * failureThreshold=3），
 # K8s 会自动重启容器
@@ -78,11 +103,11 @@ watch kubectl get pods -l app=game-service
 
 ```bash
 # 服务已自动恢复
-curl http://$(minikube ip):30080/health
+curl http://$NODE_IP:30081/health
 # 应该返回 {"status":"ok"}
 
 # 查看 Pod 事件
-kubectl describe pod -l app=game-service | grep -A5 "Events"
+kubectl -n exp11 describe pod -l app=game-service | grep -A5 "Events"
 ```
 
 ## 预期结果
@@ -101,12 +126,12 @@ kubectl describe pod -l app=game-service | grep -A5 "Events"
 ### 关键观察
 
 ```
-$ kubectl get pods -l app=game-service
+$ kubectl -n exp11 get pods
 NAME                            READY   STATUS    RESTARTS   AGE
 game-service-7d8b6c5f4-abc12   1/1     Running   0          30s
 
 # 发送死锁后 ~15 秒
-$ kubectl get pods -l app=game-service
+$ kubectl -n exp11 get pods
 NAME                            READY   STATUS    RESTARTS   AGE
 game-service-7d8b6c5f4-abc12   1/1     Running   1          45s
 ```
@@ -133,3 +158,9 @@ livenessProbe:
 - **failureThreshold**：连续失败多少次才判定为不健康
 - **自愈（Self-Healing）**：K8s 自动检测并修复故障容器
 - **优雅关闭（Graceful Shutdown）**：`preStop` 钩子 + `terminationGracePeriodSeconds`
+
+## 清理
+
+```bash
+kubectl delete namespace exp11
+```

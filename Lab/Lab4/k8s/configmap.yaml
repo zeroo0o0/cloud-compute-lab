@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: battleworld-config
-  namespace: battleworld
+  namespace: Lab4
 data:
   ROLE: "all"
   GATEWAY_ADDR: "0.0.0.0:9310"
