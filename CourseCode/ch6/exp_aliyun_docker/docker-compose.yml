@@ -1,0 +1,53 @@
+services:
+  storage:
+    build:
+      context: .
+      dockerfile: docker/storage.Dockerfile
+    image: game-storage:v1.0
+    container_name: storage
+    environment:
+      STORAGE_ADDR: 0.0.0.0:8082
+      STORAGE_LOG_PATH: /app/data/players.log
+    volumes:
+      - game-data:/app/data
+    networks:
+      - game-net
+
+  game-service:
+    build:
+      context: .
+      dockerfile: docker/game.Dockerfile
+    image: game-service:v1.0
+    container_name: game-service
+    environment:
+      GAME_ADDR: 0.0.0.0:8081
+      STORAGE_URL: http://storage:8082
+    depends_on:
+      - storage
+    volumes:
+      - game-data:/app/data
+    networks:
+      - game-net
+
+  gateway:
+    build:
+      context: .
+      dockerfile: docker/gateway.Dockerfile
+    image: game-gateway:v1.0
+    container_name: gateway
+    environment:
+      GATEWAY_ADDR: 0.0.0.0:8080
+      GAME_URL: http://game-service:8081
+    depends_on:
+      - game-service
+    ports:
+      - "${GATEWAY_HOST_PORT:-18080}:8080"
+    networks:
+      - game-net
+
+volumes:
+  game-data:
+
+networks:
+  game-net:
+    driver: bridge
