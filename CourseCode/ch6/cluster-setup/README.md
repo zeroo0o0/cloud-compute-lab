@@ -664,6 +664,17 @@ kubeadm token create --print-join-command
 sudo kubeadm join 10.0.1.10:6443 --token l2mvc6.6m0iyuxf2qvna8ak --discovery-token-ca-cert-hash sha256:fbc9772ab8beaed835f5115946dea5d733343e76c3deadeb42bf9d7d4fea08e8
 ```
 
+### 9.8 关于containerd的配置文件夹
+```
+    [plugins.'io.containerd.cri.v1.images'.registry]
+      config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'
+```
+这里的config_path不支持使用":"作为分隔，需要删除后半，否则无法识别目录
+```
+    [plugins.'io.containerd.cri.v1.images'.registry]
+      config_path = '/etc/containerd/certs.d'
+```
+
 ---
 
 ## 十、常用排错命令速查
