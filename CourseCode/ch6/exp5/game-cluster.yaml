@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: storage
+  namespace: default
   labels:
     app: storage
 spec:
@@ -14,10 +15,12 @@ spec:
       labels:
         app: storage
     spec:
+      imagePullSecrets:
+        - name: test1
       containers:
         - name: storage
-          image: exp5-storage:v1
-          imagePullPolicy: IfNotPresent
+          image: ccr.ccs.tencentyun.com/lab4/exp5-storage:v1
+          imagePullPolicy: Always
           command: ["/app/storage"]
           env:
             - name: STORAGE_ADDR
@@ -25,6 +28,7 @@ spec:
           ports:
             - name: http
               containerPort: 8082
+              protocol: TCP
           readinessProbe:
             httpGet:
               path: /get?id=health
@@ -36,6 +40,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: storage-service
+  namespace: default
 spec:
   type: ClusterIP
   selector:
@@ -44,11 +49,13 @@ spec:
     - name: http
       port: 8082
       targetPort: 8082
+      protocol: TCP
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: game
+  namespace: default
   labels:
     app: game
 spec:
@@ -61,10 +68,12 @@ spec:
       labels:
         app: game
     spec:
+      imagePullSecrets:
+        - name: test1
       containers:
         - name: game
-          image: exp5-game:v1
-          imagePullPolicy: IfNotPresent
+          image: ccr.ccs.tencentyun.com/lab4/exp5-game:v1
+          imagePullPolicy: Always
           command: ["/app/game"]
           env:
             - name: GAME_ADDR
@@ -74,6 +83,7 @@ spec:
           ports:
             - name: http
               containerPort: 8081
+              protocol: TCP
           readinessProbe:
             httpGet:
               path: /player?clientId=health
@@ -85,6 +95,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: game-service
+  namespace: default
 spec:
   type: ClusterIP
   selector:
@@ -93,11 +104,13 @@ spec:
     - name: http
       port: 8081
       targetPort: 8081
+      protocol: TCP
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gateway
+  namespace: default
   labels:
     app: gateway
 spec:
@@ -110,10 +123,12 @@ spec:
       labels:
         app: gateway
     spec:
+      imagePullSecrets:
+        - name: test1
       containers:
         - name: gateway
-          image: exp5-gateway:v1
-          imagePullPolicy: IfNotPresent
+          image: ccr.ccs.tencentyun.com/lab4/exp5-gateway:v1
+          imagePullPolicy: Always
           command: ["/app/gateway"]
           env:
             - name: GATEWAY_ADDR
@@ -123,6 +138,7 @@ spec:
           ports:
             - name: tcp
               containerPort: 8080
+              protocol: TCP
           readinessProbe:
             tcpSocket:
               port: 8080
@@ -133,13 +149,13 @@ apiVersion: v1
 kind: Service
 metadata:
   name: gateway-service
+  namespace: default
 spec:
-  type: NodePort
+  type: LoadBalancer
   selector:
     app: gateway
   ports:
     - name: tcp
       port: 8080
       targetPort: 8080
-      nodePort: 30080
-
+      protocol: TCP

@@ -1,0 +1,7 @@
+FROM scratch
+WORKDIR /app
+ENV LAB3_DATA_ROOT=/var/lib/lab3
+COPY .dist/lab3-cloud-coordinator /app/lab3-cloud-coordinator
+EXPOSE 9320
+VOLUME ["/var/lib/lab3"]
+CMD ["/app/lab3-cloud-coordinator"]

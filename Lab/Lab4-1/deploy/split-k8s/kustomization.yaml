@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: lab3-split
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - coordinator-pvc.yaml
+  - coordinator-service.yaml
+  - coordinator-deployment.yaml
+  - gateway-service.yaml
+  - gateway-deployment.yaml
+  - map-green-service.yaml
+  - map-green-deployment.yaml
+  - map-cave-service.yaml
+  - map-cave-deployment.yaml
+  - map-ruins-service.yaml
+  - map-ruins-deployment.yaml

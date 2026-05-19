@@ -1,0 +1,5 @@
+FROM scratch
+WORKDIR /app
+COPY .dist/lab3-cloud-gateway /app/lab3-cloud-gateway
+EXPOSE 9310
+CMD ["/app/lab3-cloud-gateway"]
