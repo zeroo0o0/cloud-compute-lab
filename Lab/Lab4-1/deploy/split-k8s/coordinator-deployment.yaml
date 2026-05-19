@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab3-coordinator
+  namespace: lab3-split
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab3-coordinator
+  template:
+    metadata:
+      labels:
+        app: lab3-coordinator
+    spec:
+      serviceAccountName: lab3-runner
+      containers:
+        - name: coordinator
+          image: ccr.ccs.tencentyun.com/lab4/coordinator:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LAB3_COORDINATOR_ADDR
+              value: ":9320"
+            - name: LAB3_DATA_ROOT
+              value: "/var/lib/lab3"
+            - name: LAB3_GREEN_URL
+              value: "http://lab3-map-green:9400"
+            - name: LAB3_CAVE_URL
+              value: "http://lab3-map-cave:9400"
+            - name: LAB3_RUINS_URL
+              value: "http://lab3-map-ruins:9400"
+            - name: LAB3_GREEN_NODE_ID
+              value: "map-green"
+            - name: LAB3_CAVE_NODE_ID
+              value: "map-cave"
+            - name: LAB3_RUINS_NODE_ID
+              value: "map-ruins"
+          ports:
+            - containerPort: 9320
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9320
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9320
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: coordinator-data
+              mountPath: /var/lib/lab3
+      volumes:
+        - name: coordinator-data
+          persistentVolumeClaim:
+            claimName: lab3-coordinator-data
