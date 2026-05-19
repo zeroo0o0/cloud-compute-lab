@@ -85,7 +85,7 @@ docker build -f docker/gateway.Dockerfile -t game-gateway:v1.0 .
 ```powershell
 mkdir data
 docker network create game-net
-docker run -d --name storage --network game-net -v ${PWD}\data:/app/data game-storage:v1.0
+docker run -d --name storage --network game-net -v ${PWD}/data:/app/data game-storage:v1.0
 docker run -d --name game-service --network game-net -e STORAGE_URL=http://storage:8082 game-service:v1.0
 docker run -d --name gateway --network game-net -p 18080:8080 -e GAME_URL=http://game-service:8081 game-gateway:v1.0
 ```
