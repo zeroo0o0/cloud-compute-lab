@@ -165,8 +165,8 @@ func main() {
 	gameURL := os.Getenv("GAME_URL")
 	if gameURL == "" {
 		// 同机直连示例（仅本机运行没问题，Docker 容器内无法访问到其它容器）：
-		// gameURL = "http://127.0.0.1:8081"
-		gameURL = "http://game-service:8081"
+		gameURL = "http://127.0.0.1:8081"
+		// gameURL = "http://game-service:8081"
 	}
 	if !strings.HasPrefix(gameURL, "http://") && !strings.HasPrefix(gameURL, "https://") {
 		gameURL = "http://" + gameURL

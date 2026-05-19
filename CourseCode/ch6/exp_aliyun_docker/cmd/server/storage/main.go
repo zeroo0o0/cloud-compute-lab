@@ -81,8 +81,8 @@ func main() {
 	addr := os.Getenv("STORAGE_ADDR")
 	if addr == "" {
 		// 同机直连示例（仅本机运行没问题，Docker 容器内会导致外部无法访问）：
-		// addr = "127.0.0.1:8082"
-		addr = "0.0.0.0:8082"
+		addr = "127.0.0.1:8082"
+		// addr = "0.0.0.0:8082"
 	}
 	logPath := resolveLogPath()
 	if err := ensureLogDir(logPath); err != nil {
