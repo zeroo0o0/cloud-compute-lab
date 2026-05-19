@@ -157,12 +157,16 @@ func main() {
 	// 网关监听地址。
 	addr := os.Getenv("GATEWAY_ADDR")
 	if addr == "" {
+		// 同机直连示例（仅本机运行没问题，Docker 容器内会导致外部无法访问）：
 		addr = "127.0.0.1:8080"
+		// addr = "0.0.0.0:8080"
 	}
 	// game 服务地址（网关的下游）。
 	gameURL := os.Getenv("GAME_URL")
 	if gameURL == "" {
-		gameURL = "http://127.0.0.1:8081"
+		// 同机直连示例（仅本机运行没问题，Docker 容器内无法访问到其它容器）：
+		// gameURL = "http://127.0.0.1:8081"
+		gameURL = "http://game-service:8081"
 	}
 	if !strings.HasPrefix(gameURL, "http://") && !strings.HasPrefix(gameURL, "https://") {
 		gameURL = "http://" + gameURL

@@ -138,12 +138,16 @@ func main() {
 	// game 服务监听地址。
 	addr := os.Getenv("GAME_ADDR")
 	if addr == "" {
-		addr = "127.0.0.1:8081"
+		// 同机直连示例（仅本机运行没问题，Docker 容器内会导致外部无法访问）：
+		// addr = "127.0.0.1:8081"
+		addr = "0.0.0.0:8081"
 	}
 	// storage 下游地址。
 	storageURL := os.Getenv("STORAGE_URL")
 	if storageURL == "" {
-		storageURL = "http://127.0.0.1:8082"
+		// 同机直连示例（仅本机运行没问题，Docker 容器内无法访问到其它容器）：
+		// storageURL = "http://127.0.0.1:8082"
+		storageURL = "http://storage:8082"
 	}
 	if !strings.HasPrefix(storageURL, "http://") && !strings.HasPrefix(storageURL, "https://") {
 		storageURL = "http://" + storageURL
