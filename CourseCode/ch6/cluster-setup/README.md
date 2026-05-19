@@ -645,6 +645,25 @@ kubectl -n kube-system get pods -l app=flannel
 kubectl -n kube-system delete pod -l k8s-app=kube-dns
 ```
 
+### 9.7 删除节点及其恢复
+```bash
+# 释放节点b的pod
+kubectl drain k8s-b --ignore-daemonsets --delete-emptydir-data
+
+# 当上一步执行完毕，确认节点上的 Pod 都搬走后，在控制机上把它从集群名单里划掉：
+kubectl delete node k8s-b
+
+# 登录到那台被踢掉的 `k8s-b` 机器上，清空网络配置和证书，方便以后复用：
+kubeadm reset
+iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
+
+# 恢复节点同加入节点
+# 在master上运行
+kubeadm token create --print-join-command
+# k8s-b上运行上一步生成出的指令,如(每次生成都会变换):
+sudo kubeadm join 10.0.1.10:6443 --token l2mvc6.6m0iyuxf2qvna8ak --discovery-token-ca-cert-hash sha256:fbc9772ab8beaed835f5115946dea5d733343e76c3deadeb42bf9d7d4fea08e8
+```
+
 ---
 
 ## 十、常用排错命令速查
