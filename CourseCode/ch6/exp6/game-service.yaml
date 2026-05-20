@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: game
-          image: exp6-game:v1
+          image: 10.0.2.12:5000/exp6/exp6-game:v1
           imagePullPolicy: IfNotPresent
           command: ["/app/game"]
           env:

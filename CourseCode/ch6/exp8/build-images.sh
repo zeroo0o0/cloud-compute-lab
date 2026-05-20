@@ -2,10 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$SCRIPT_DIR/dist"
 REGISTRY="${REGISTRY:-10.0.2.12:5000}"
-IMAGE_PREFIX="$REGISTRY/exp6"
+IMAGE_PREFIX="$REGISTRY/exp8"
+REDIS_SOURCE_IMAGE="${REDIS_SOURCE_IMAGE:-redis:7-alpine}"
 
 mkdir -p "$DIST_DIR"
 
@@ -18,7 +18,8 @@ if ! command -v go >/dev/null 2>&1; then
   sudo apt install -y golang-go
 
 安装后重新执行：
-  bash exp6/build-images.sh
+  cd exp8
+  bash build-images.sh
 EOF
   exit 1
 fi
@@ -32,19 +33,23 @@ EOF
   exit 1
 fi
 
-pushd "$ROOT_DIR/exp6/game-app" >/dev/null
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$DIST_DIR/game" ./cmd/server/game
+pushd "$SCRIPT_DIR/game-app" >/dev/null
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$DIST_DIR/gateway" ./cmd/server/gateway
 popd >/dev/null
 
-pushd "$ROOT_DIR" >/dev/null
-docker build -f exp6/Dockerfile.prebuilt -t exp6-game:v1 .
+pushd "$SCRIPT_DIR" >/dev/null
+docker build -f Dockerfile.prebuilt --build-arg SERVICE=gateway -t exp8-gateway:v1 .
+docker tag exp8-gateway:v1 "$IMAGE_PREFIX/exp8-gateway:v1"
+docker push "$IMAGE_PREFIX/exp8-gateway:v1"
 
-docker tag exp6-game:v1 "$IMAGE_PREFIX/exp6-game:v1"
-docker push "$IMAGE_PREFIX/exp6-game:v1"
+docker pull "$REDIS_SOURCE_IMAGE"
+docker tag "$REDIS_SOURCE_IMAGE" "$IMAGE_PREFIX/redis:v1"
+docker push "$IMAGE_PREFIX/redis:v1"
 popd >/dev/null
 
 cat <<EOF
 
 镜像已构建并推送到：
-  $IMAGE_PREFIX/exp6-game:v1
+  $IMAGE_PREFIX/exp8-gateway:v1
+  $IMAGE_PREFIX/redis:v1
 EOF

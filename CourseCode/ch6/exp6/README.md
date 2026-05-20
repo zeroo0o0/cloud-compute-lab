@@ -8,82 +8,91 @@
 课堂上要让学生看到两件事：
 
 - 在集群内部，可以直接通过稳定的 Service 名称 `http://game-service:8081` 访问服务。
-- 在集群外部，NodePort 会把服务暴露为 `NodeIP:30080`；在多节点集群中，访问任意一个 Node 的 `30080`，都能转发到同一组后端 Pod。
+- 在集群外部，NodePort 会把服务暴露为 `NodeIP:30086`；在多节点集群中，访问任意一个 Node 的 `30086`，都能转发到同一组后端 Pod。
 
-## 目录结构（当前）
+## 目录结构
 
 ```text
 exp6/
 ├── README.md                    # 本实验说明文档
 ├── game-service.yaml            # Deployment + ClusterIP Service
 ├── game-svc-external.yaml       # NodePort Service
-├── build-images.sh              # WSL / Ubuntu 下构建镜像脚本
+├── build-images.sh              # 构建、标记并推送镜像
 ├── Dockerfile                   # 直接从 Go 源码构建镜像
 ├── Dockerfile.prebuilt          # 使用预编译二进制构建极简镜像
 ├── dist/                        # build-images.sh 生成的 Linux 二进制
 └── game-app/                    # 待部署的 game 服务源码
 ```
 
-## 0. 准备 exp6 Minikube 集群
+## 0. 登录云上 Kubernetes 集群
 
-先打开 Ubuntu / WSL：
-
-```powershell
-wsl -d Ubuntu
-```
-
-进入本项目目录。比如Windows 的 `C:\ch6` 在 WSL 里通常对应：
+先 SSH 登录可以操作集群的服务器，例如节点 A：
 
 ```bash
-cd "/mnt/c/ch6"
+ssh <用户名>@k8s-a
 ```
 
-新建并启动一个名为 `exp6` 的双节点 Minikube 集群：
+进入本项目目录：
 
 ```bash
-minikube start -p exp6 --nodes 2
+cd /path/to/ch6
 ```
 
-确认当前操作的是 `exp6` 集群：
+确认当前 `kubectl` 已经连到云上多节点集群：
 
 ```bash
-kubectl config current-context
 kubectl get nodes -o wide
 ```
 
-看到当前上下文是 `exp6`，并且节点状态类似下面这样，就说明可以继续：
+预期能看到 4 个节点处于 `Ready`，例如：
 
 ```text
-exp6
-
-NAME       STATUS   ROLES           AGE   VERSION   INTERNAL-IP
-exp6       Ready    control-plane   ...   ...       192.168.x.x
-exp6-m02   Ready    <none>          ...   ...       192.168.x.x
+NAME    STATUS   ROLES           INTERNAL-IP
+k8s-a   Ready    control-plane   ...
+k8s-b   Ready    <none>          ...
+k8s-c   Ready    <none>          ...
+k8s-d   Ready    <none>          10.0.2.12
 ```
 
-## 1. 构建镜像
+如果集群已经安装 metrics-server，可以顺手确认指标服务可用：
 
-### 方式 A：先在 WSL 编译，再用极简镜像打包（推荐）
+```bash
+kubectl top nodes
+kubectl top pods
+```
 
-在 Ubuntu / WSL 里执行 Bash 脚本。它会先把 Go 服务编译成 Linux 静态二进制，再使用 `Dockerfile.prebuilt` 打镜像。
+本实验不依赖 HPA，`kubectl top` 失败不会影响 exp6 的核心流程。
+
+## 1. 构建并推送镜像
+
+本实验统一使用节点 D 上的本地镜像仓库：
+
+```text
+10.0.2.12:5000
+```
+
+最终 Kubernetes YAML 使用的镜像是：
+
+```text
+10.0.2.12:5000/exp6/exp6-game:v1
+```
+
+使用脚本构建、tag、push
+
+在项目根目录执行：
 
 ```bash
 bash exp6/build-images.sh
 ```
 
-### 方式 B：直接使用 Dockerfile 从源码构建
-
-如果你不想在 WSL 本地安装 Go，也可以让 Docker 在构建镜像时完成编译：
+脚本会依次完成：
 
 ```bash
-docker build -f exp6/Dockerfile -t exp6-game:v1 .
+docker build -f exp6/Dockerfile.prebuilt -t exp6-game:v1 .
+docker tag exp6-game:v1 10.0.2.12:5000/exp6/exp6-game:v1
+docker push 10.0.2.12:5000/exp6/exp6-game:v1
 ```
 
-两种方式任选其一即可。完成后，把镜像加载进 Minikube：
-
-```bash
-minikube -p exp6 image load exp6-game:v1
-```
 
 ## 2. 创建集群内部入口：ClusterIP
 
@@ -154,13 +163,15 @@ kubectl get svc game-service game-service-external
 ```text
 NAME                    TYPE        CLUSTER-IP      PORT(S)
 game-service            ClusterIP   10.x.x.x        8081/TCP
-game-service-external   NodePort    10.x.x.x        8081:30080/TCP
+game-service-external   NodePort    10.x.x.x        8081:30086/TCP
 ```
 
 这里的关键点是：
 
 - `game-service` 仍然是集群内部入口。
-- `game-service-external` 是外部入口，把同一组 `game` Pod 暴露到每个 Node 的 `30080` 端口。
+- `game-service-external` 是外部入口，把同一组 `game` Pod 暴露到每个 Node 的 `30086` 端口。
+
+如果提示 `provided port is already allocated`，说明集群里已有其他 Service 占用了 `30086`。先清理对应实验，或者临时把 `exp6/game-svc-external.yaml` 中的 `nodePort` 改成未占用端口。
 
 ## 5. 在集群外部访问任意 Node 的 NodePort
 
@@ -170,74 +181,33 @@ game-service-external   NodePort    10.x.x.x        8081:30080/TCP
 kubectl get nodes -o wide
 ```
 
-假设两个节点分别是：
+假设几个节点的 IP 是：
 
 ```text
-exp6       192.168.49.2
-exp6-m02   192.168.49.3
+k8s-a   10.0.2.9
+k8s-b   10.0.2.10
+k8s-c   10.0.2.11
+k8s-d   10.0.2.12
 ```
 
-那么标准访问方式就是分别访问两个 Node 的同一个 `30080` 端口：
+那么标准访问方式就是分别访问不同 Node 的同一个 `30086` 端口：
 
 ```bash
-curl http://192.168.49.2:30080/move
-curl http://192.168.49.3:30080/move
+curl http://10.0.1.10:30086/move
+curl http://10.0.2.10:30086/move
+curl http://10.0.2.11:30086/move
+curl http://10.0.2.12:30086/move
 ```
 
-两个地址都成功时，会看到相同的返回：
+如果从公网访问，请使用云服务器公网 IP，并确认安全组已经放行 TCP `30086`。
+
+两个或多个地址都成功时，会看到相同的返回：
 
 ```json
 {"ok":true,"service":"game","message":"move accepted"}
 ```
 
 这说明：即使请求从不同 Node 进入，`NodePort` 也能把它们转发到同一个 Service 后端。
-
-### 如果直接访问 NodeIP:30080 失败
-
-如果你使用的是 `docker` driver，尤其是在 macOS / Windows / WSL 等环境下，Minikube 节点可能位于 Docker 的内部网络中，当前终端未必能直接访问这个节点 IP。此时并不是 NodePort 创建失败，而是：
-
-```text
-NodePort 已经存在，
-但当前终端到 Minikube 节点 IP 的网络路径不通。
-```
-
-这时改用 Minikube 提供的辅助访问方式：
-
-```bash
-minikube service game-service-external -p exp6
-```
-
-执行后，Minikube 会输出一个当前环境可访问的地址，并尝试在浏览器中打开它。这个地址的端口可能不是 `30080`，因为它是 Minikube 临时建立的本地转发入口；真正的 Kubernetes `NodePort` 仍然是 YAML 中配置的 `30080`。
-
-输出示例：
-
-```text
-|-----------|-----------------------|-------------|--------------------------|
-| NAMESPACE |         NAME          | TARGET PORT |           URL            |
-|-----------|-----------------------|-------------|--------------------------|
-| default   | game-service-external | http/8081   | http://192.168.85.2:30080 |
-|-----------|-----------------------|-------------|--------------------------|
-🏃  Starting tunnel for service game-service-external.
-|-----------|-----------------------|-------------|------------------------|
-| NAMESPACE |         NAME          | TARGET PORT |          URL           |
-|-----------|-----------------------|-------------|------------------------|
-| default   | game-service-external |             | http://127.0.0.1:38805 |
-|-----------|-----------------------|-------------|------------------------|
-```
-
-这里第一张表里的 `192.168.85.2:30080` 是原始 NodePort 地址；后面的 `127.0.0.1:38805` 是 Minikube 为当前环境临时建立的可访问通道。
-
-可以把这层关系理解成：
-
-```text
-你的终端 -> Minikube 临时访问地址 -> NodePort 30080 -> game Pod 8081
-```
-
-然后对 Minikube 输出的地址追加 `/move` 进行访问，例如：
-
-```bash
-curl http://127.0.0.1:xxxxx/move
-```
 
 ## 6. 对比两个 Service 背后的后端
 
@@ -265,9 +235,9 @@ game-service-external   10.244.0.5:8081
 
 ```text
 集群内访问：game-service:8081
-集群外访问：Node-A:30080 / Node-B:30080
-                          \ /
-                       同一组 game Pod
+集群外访问：Node-A:30086 / Node-B:30086 / Node-C:30086
+                          \       |       /
+                           同一组 game Pod
 ```
 
 ## 7. 课堂展示脚本
@@ -275,6 +245,7 @@ game-service-external   10.244.0.5:8081
 1. 展示 `exp6/game-service.yaml`：
    - `Deployment` 负责真正运行 `game` Pod。
    - `game-service` 的 `type: ClusterIP` 表示它只服务于集群内部访问。
+
 2. 执行：
 
 ```bash
@@ -292,25 +263,19 @@ wget -qO- http://game-service:8081/move
 
 4. 展示 `exp6/game-svc-external.yaml`：
    - `type: NodePort`
-   - `nodePort: 30080`
+   - `nodePort: 30086`
+
 5. 执行：
 
 ```bash
 kubectl apply -f exp6/game-svc-external.yaml
 kubectl get svc game-service game-service-external
 kubectl get nodes -o wide
-curl http://<Node-A-IP>:30080/move
-curl http://<Node-B-IP>:30080/move
+curl http://<Node-A-IP>:30086/move
+curl http://<Node-B-IP>:30086/move
 ```
 
-6. 如果直接访问失败，再执行：
-
-```bash
-minikube service game-service-external -p exp6
-```
-
-并对输出地址追加 `/move` 访问，说明外部客户端仍然能到达同一后端。
-7. 最后执行：
+6. 最后执行：
 
 ```bash
 kubectl get endpoints game-service game-service-external
@@ -325,38 +290,9 @@ kubectl delete -f exp6/game-svc-external.yaml
 kubectl delete -f exp6/game-service.yaml
 ```
 
-## 9. 常见问题
-
-### debug 容器里访问失败
-
-先确认 `game` Pod 已经进入 `Running`：
+确认资源已经删除：
 
 ```bash
 kubectl get pods
-kubectl describe pod -l app=game
+kubectl get svc
 ```
-
-再确认 `game-service` 已经创建：
-
-```bash
-kubectl get svc game-service
-kubectl get endpoints game-service
-```
-
-### 外部 `curl` 访问失败
-
-先确认 NodePort Service 已经创建：
-
-```bash
-kubectl get svc game-service-external
-```
-
-如果你直接访问 `NodeIP:30080` 不通，不代表 Service 配置失败。若你使用的是 `docker` driver，尤其是在 macOS / Windows / WSL 等环境下，节点 IP 可能位于 Docker 内部网络，当前终端不能直接路由到它。
-
-这时改用：
-
-```bash
-minikube service game-service-external -p exp6
-```
-
-由 Minikube 建立可访问通道后，再访问它输出的地址。
