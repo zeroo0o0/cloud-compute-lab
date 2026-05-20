@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: loadgen
-          image: exp7-loadgen:v1
+          image: 10.0.2.12:5000/exp7/exp7-loadgen:v1
           imagePullPolicy: IfNotPresent
           command:
             - /app/loadgen

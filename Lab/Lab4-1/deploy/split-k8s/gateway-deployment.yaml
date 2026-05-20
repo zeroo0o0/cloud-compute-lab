@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab3-gateway
+  namespace: lab3-split
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: lab3-gateway
+  template:
+    metadata:
+      labels:
+        app: lab3-gateway
+    spec:
+      serviceAccountName: lab3-runner
+      containers:
+        - name: gateway
+          image: ccr.ccs.tencentyun.com/lab4/gateway:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LAB3_GATEWAY_ADDR
+              value: "0.0.0.0:9310"
+            - name: LAB3_COORDINATOR_URL
+              value: "http://lab3-coordinator:9320"
+          ports:
+            - containerPort: 9310
+              name: tcp-gateway
+          readinessProbe:
+            tcpSocket:
+              port: 9310
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 9310
+            initialDelaySeconds: 10
+            periodSeconds: 10

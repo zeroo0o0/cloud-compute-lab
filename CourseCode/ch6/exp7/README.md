@@ -11,90 +11,110 @@
 - 流量升高时，`game` Pod 数量会从 1 个逐步增加。
 - 停止压测后，Pod 数量不会立刻下降，但等待一段时间后会自动缩回。
 
-## 目录结构（当前）
+## 目录结构
 
 ```text
 exp7/
 ├── README.md                    # 本实验说明文档
 ├── game-autoscale.yaml          # Deployment + Service + HPA
 ├── loadgen.yaml                 # 集群内压测器
-├── build-images.sh              # WSL / Ubuntu 下构建镜像脚本
+├── build-images.sh              # 构建、标记并推送镜像
 ├── Dockerfile                   # 直接从 Go 源码构建镜像
 ├── Dockerfile.prebuilt          # 使用预编译二进制构建极简镜像
 ├── dist/                        # build-images.sh 生成的 Linux 二进制
 └── game-app/                    # game 与 loadgen 源码
 ```
 
-## 0. 准备 exp7 Minikube 集群
+## 0. 登录云上 Kubernetes 集群
 
-先打开 Ubuntu / WSL：
-
-```powershell
-wsl -d Ubuntu
-```
-
-进入项目目录：
+先 SSH 登录可以操作集群的服务器，例如节点 A：
 
 ```bash
-cd "/mnt/你的项目目录/ch6"
+ssh <用户名>@<节点地址>
 ```
 
-新建并启动一个名为 `exp7` 的 Minikube 集群：
+进入本实验目录：
 
 ```bash
-minikube start -p exp7
+cd /path/to/ch6/exp7
 ```
 
-确认当前操作的是 `exp7` 集群：
+确认当前 `kubectl` 已经连到云上多节点集群：
 
 ```bash
-kubectl config current-context
-kubectl get nodes
+kubectl get nodes -o wide
 ```
 
-## 1. 启用 metrics-server
+预期能看到 4 个节点处于 `Ready`，例如：
 
-HPA 需要先拿到 Pod 的资源指标。Minikube 可以直接启用 `metrics-server` 插件：
-
-```bash
-minikube -p exp7 addons enable metrics-server
+```text
+NAME    STATUS   ROLES           INTERNAL-IP
+k8s-a   Ready    control-plane   ...
+k8s-b   Ready    <none>          ...
+k8s-c   Ready    <none>          ...
+k8s-d   Ready    <none>          10.0.2.12
 ```
 
-等待一会儿后检查：
+HPA 依赖 metrics-server 提供 CPU 指标。继续确认指标服务可用：
 
 ```bash
-kubectl get pods -n kube-system
+kubectl top nodes
 kubectl top pods
 ```
 
-如果 `kubectl top pods` 能返回指标，说明 HPA 的“眼睛”已经睁开。
+如果 `kubectl top` 暂时没有数据，HPA 的 `TARGETS` 可能显示 `<unknown>/50%`，需要先修好 metrics-server 或等待指标采集完成。
 
-## 2. 构建镜像
+## 1. 构建并推送镜像
 
-### 方式 A：先在 WSL 编译，再用极简镜像打包（推荐）
+本实验统一使用节点 D 上的本地镜像仓库：
 
-```bash
-bash exp7/build-images.sh
+```text
+10.0.2.12:5000
 ```
 
-### 方式 B：直接使用 Dockerfile 从源码构建
+最终 Kubernetes YAML 使用的镜像是：
 
-```bash
-docker build -f exp7/Dockerfile --build-arg TARGET=game -t exp7-game:v1 .
-docker build -f exp7/Dockerfile --build-arg TARGET=loadgen -t exp7-loadgen:v1 .
+```text
+10.0.2.12:5000/exp7/exp7-game:v1
+10.0.2.12:5000/exp7/exp7-loadgen:v1
 ```
 
-两种方式任选其一。完成后，把镜像加载进 Minikube：
+在 `exp7` 目录执行：
 
 ```bash
-minikube -p exp7 image load exp7-game:v1
-minikube -p exp7 image load exp7-loadgen:v1
+bash build-images.sh
 ```
 
-## 3. 部署初始只有 1 个副本的 game
+脚本会直接使用当前 `exp7` 目录作为 Docker 构建上下文，并依次完成：
 
 ```bash
-kubectl apply -f exp7/game-autoscale.yaml
+docker build -f Dockerfile.prebuilt --build-arg SERVICE=game -t exp7-game:v1 .
+docker build -f Dockerfile.prebuilt --build-arg SERVICE=loadgen -t exp7-loadgen:v1 .
+
+docker tag exp7-game:v1 10.0.2.12:5000/exp7/exp7-game:v1
+docker tag exp7-loadgen:v1 10.0.2.12:5000/exp7/exp7-loadgen:v1
+
+docker push 10.0.2.12:5000/exp7/exp7-game:v1
+docker push 10.0.2.12:5000/exp7/exp7-loadgen:v1
+```
+
+确认本地 Docker 镜像：
+
+```bash
+docker images | grep exp7
+```
+
+## 2. 部署初始只有 1 个副本的 game
+
+应用 YAML：
+
+```bash
+kubectl apply -f game-autoscale.yaml
+```
+
+查看 Deployment、HPA 和 Pod：
+
+```bash
 kubectl get deploy game
 kubectl get hpa game
 kubectl get pods -o wide
@@ -133,7 +153,7 @@ behavior:
 
 这表示：HPA 以 `requests.cpu` 为基准，当平均 CPU 利用率超过 50% 时，就会考虑扩容。为了让课堂上更快看到变化，本实验使用“快速演示模式”：扩容稳定窗口为 `0` 秒，单轮最多允许补到 `8` 个 Pod；缩容稳定窗口缩短为 `15` 秒，并允许每轮最多缩掉当前副本的 `100%`。
 
-## 4. 开启分屏观察
+## 3. 开启分屏观察
 
 建议开三个终端：
 
@@ -155,12 +175,14 @@ watch kubectl get hpa game
 watch kubectl top pods
 ```
 
-## 5. 制造“流量海啸”
+如果 `kubectl top pods` 没有数据，先不要启动压测，等 metrics-server 正常返回指标后再继续。
+
+## 4. 制造“流量海啸”
 
 启动集群内压测器：
 
 ```bash
-kubectl apply -f exp7/loadgen.yaml
+kubectl apply -f loadgen.yaml
 kubectl get pods -l app=loadgen
 ```
 
@@ -179,7 +201,7 @@ http://game-service:8081/burn?ms=250
 90s     16 workers
 ```
 
-`/burn` 不是“假忙”，而是真的在容器里持续做 CPU 计算，所以可以推动 HPA 看到 CPU 压力。这样做的好处是，课堂上更容易观察到 CPU 逐步升高、HPA 再逐步扩容，而不是所有变化挤在一瞬间发生。
+`/burn` 不是“假忙”，而是真的在容器里持续做 CPU 计算，所以可以推动 HPA 看到 CPU 压力。
 
 几分钟内，终端里会逐步看到类似现象：
 
@@ -204,12 +226,12 @@ TARGETS    MINPODS   MAXPODS   REPLICAS
 180%/50%   1         8         4
 ```
 
-## 6. 停止压测，观察自动缩容
+## 5. 停止压测，观察自动缩容
 
 停止压测器：
 
 ```bash
-kubectl delete -f exp7/loadgen.yaml
+kubectl delete -f loadgen.yaml
 ```
 
 继续观察：
@@ -219,11 +241,11 @@ watch kubectl get hpa game
 watch kubectl get pods
 ```
 
-注意：缩容仍然不会是毫秒级。HPA 仍按控制循环定期判断，只是本实验把缩容窗口压到 `15` 秒，因此压测停止后，课堂上通常会更快看到 `game` Pod 数量回落。这个配置适合演示，不适合作为生产默认值。
+注意：缩容仍然不会是毫秒级。HPA 仍按控制循环定期判断，只是本实验把缩容窗口压到 `15` 秒，因此压测停止后，课堂上通常会更快看到 `game` Pod 数量回落。
 
-## 7. 课堂展示脚本
+## 6. 课堂展示脚本
 
-1. 展示 `exp7/game-autoscale.yaml`：
+1. 展示 `game-autoscale.yaml`：
    - `replicas: 1`
    - `requests.cpu: 100m`
    - `averageUtilization: 50`
@@ -233,10 +255,11 @@ watch kubectl get pods
    - `scaleUp.policies: 15 秒内最多增加 8 个 Pod`
    - `scaleDown.stabilizationWindowSeconds: 15`
    - `scaleDown.policies: 15 秒内最多缩掉当前副本的 100%`
+
 2. 执行：
 
 ```bash
-kubectl apply -f exp7/game-autoscale.yaml
+kubectl apply -f game-autoscale.yaml
 kubectl get deploy game
 kubectl get hpa game
 ```
@@ -252,56 +275,36 @@ watch kubectl top pods
 4. 启动压测：
 
 ```bash
-kubectl apply -f exp7/loadgen.yaml
+kubectl apply -f loadgen.yaml
 ```
 
 5. 让学生观察：
 
 ```text
-loadgen workers：2 -> 4 -> 8 -> 16
 -> CPU 逐步上升
 -> HPA 判断超过阈值
--> Deployment 增加副本
 -> Pod 数量逐步扩张
 ```
 
 6. 停止压测：
 
 ```bash
-kubectl delete -f exp7/loadgen.yaml
+kubectl delete -f loadgen.yaml
 ```
 
 7. 等待并观察自动缩容。
 
-## 8. 清理
+## 7. 清理
 
 ```bash
-kubectl delete -f exp7/loadgen.yaml --ignore-not-found
-kubectl delete -f exp7/game-autoscale.yaml
+kubectl delete -f loadgen.yaml --ignore-not-found
+kubectl delete -f game-autoscale.yaml
 ```
 
-## 9. 常见问题
-
-### HPA 一直显示 `<unknown>/50%`
-
-通常说明资源指标还没准备好。先检查：
+确认资源已经删除：
 
 ```bash
-kubectl top pods
-kubectl get pods -n kube-system
+kubectl get pods
+kubectl get hpa
+kubectl get svc
 ```
-
-如果 `kubectl top pods` 还不能返回数据，再等一会儿后重试。
-
-### Pod 一直不扩容
-
-优先检查三件事：
-
-```bash
-kubectl get hpa game
-kubectl top pods
-kubectl logs deploy/loadgen
-```
-
-还要确认 `game-autoscale.yaml` 里已经配置了 `resources.requests.cpu`。没有 CPU request，HPA 就没有计算利用率的基准。
-

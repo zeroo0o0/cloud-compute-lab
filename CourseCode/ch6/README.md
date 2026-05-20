@@ -14,6 +14,9 @@ ch6/
 ├── exp1/
 │   ├── go.mod
 │   ├── README.md
+├── exp_aliyun_docker/
+│   ├── docker-compose.yml
+│   └── README.md
 │   ├── cmd/
 │   │   ├── env_demo/
 │   │   ├── client/
@@ -83,6 +86,7 @@ mv ~/.docker/config.json ~/.docker/config.json.bak
 | 实验二 | 数据卷持久化 | `exp2` | 宿主机日志目录 `data/game-logs` |
 | 实验三 | 进入容器排查问题 | `exp3` | `docker exec` 排障命令 |
 | 实验四 | Docker Compose 单机编排 | `exp4` | `docker-compose.yml`、网络、卷、三层服务 |
+| 云端扩展 | 环境冲突与 Docker 修复 | `exp_aliyun_docker` | 云端部署失败 + 容器统一环境 |
 
 ---
 
@@ -92,6 +96,7 @@ mv ~/.docker/config.json ~/.docker/config.json.bak
 2. 在 `exp2` 使用宿主机目录挂载，验证日志持久化。
 3. 在 `exp3` 独立启动 `storage` 与 `game-service`，完成容器内排查。
 4. 在 `exp4` 使用 Compose 完成单机多容器编排。
+5. （可选）在 `exp_aliyun_docker` 复现云端环境冲突并用 Docker 修复。
 
 ---
 

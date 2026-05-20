@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$SCRIPT_DIR/dist"
+REGISTRY="${REGISTRY:-10.0.2.12:5000}"
+IMAGE_PREFIX="$REGISTRY/exp6"
 
 mkdir -p "$DIST_DIR"
 
@@ -36,4 +38,13 @@ popd >/dev/null
 
 pushd "$ROOT_DIR" >/dev/null
 docker build -f exp6/Dockerfile.prebuilt -t exp6-game:v1 .
+
+docker tag exp6-game:v1 "$IMAGE_PREFIX/exp6-game:v1"
+docker push "$IMAGE_PREFIX/exp6-game:v1"
 popd >/dev/null
+
+cat <<EOF
+
+镜像已构建并推送到：
+  $IMAGE_PREFIX/exp6-game:v1
+EOF
