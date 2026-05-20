@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: storage
-          image: exp5-storage:v1
+          image: 10.0.2.12:5000/exp5/exp5-storage:v1
           imagePullPolicy: IfNotPresent
           command: ["/app/storage"]
           env:
@@ -63,7 +63,7 @@ spec:
     spec:
       containers:
         - name: game
-          image: exp5-game:v1
+          image: 10.0.2.12:5000/exp5/exp5-game:v1
           imagePullPolicy: IfNotPresent
           command: ["/app/game"]
           env:
@@ -112,7 +112,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: exp5-gateway:v1
+          image: 10.0.2.12:5000/exp5/exp5-gateway:v1
           imagePullPolicy: IfNotPresent
           command: ["/app/gateway"]
           env:
