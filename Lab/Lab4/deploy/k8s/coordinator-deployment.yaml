@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab4-coordinator
+  namespace: lab4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab4-coordinator
+  template:
+    metadata:
+      labels:
+        app: lab4-coordinator
+    spec:
+      serviceAccountName: lab4-runner
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: lab4-coordinator
+      containers:
+        - name: coordinator
+          image: lab4/coordinator:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: LAB4_KUBE_STATE
+              value: "true"
+            - name: LAB4_NAMESPACE
+              value: "lab4"
+            - name: LAB4_COMPONENT
+              value: "coordinator"
+            - name: LAB4_COORDINATOR_STATE
+              value: "lab4-coordinator-state"
+            - name: LAB4_COORDINATOR_ADDR
+              value: ":9320"
+            - name: LAB4_GREEN_URL
+              value: "http://lab4-map-green:9400"
+            - name: LAB4_CAVE_URL
+              value: "http://lab4-map-cave:9400"
+            - name: LAB4_RUINS_URL
+              value: "http://lab4-map-ruins:9400"
+            - name: LAB4_GREEN_NODE_ID
+              value: "map-green"
+            - name: LAB4_CAVE_NODE_ID
+              value: "map-cave"
+            - name: LAB4_RUINS_NODE_ID
+              value: "map-ruins"
+          ports:
+            - containerPort: 9320
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9320
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9320
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

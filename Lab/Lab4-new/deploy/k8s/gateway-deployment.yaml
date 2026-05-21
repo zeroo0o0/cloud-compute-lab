@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab4-gateway
+  namespace: lab4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab4-gateway
+  template:
+    metadata:
+      labels:
+        app: lab4-gateway
+      annotations:
+        controller.kubernetes.io/pod-deletion-cost: "-1000"
+        lab4/active-players: "0"
+        lab4/draining: "false"
+    spec:
+      serviceAccountName: lab4-runner
+      terminationGracePeriodSeconds: 360
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: lab4-gateway
+      containers:
+        - name: gateway
+          image: lab4/gateway:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LAB4_GATEWAY_ADDR
+              value: "0.0.0.0:9310"
+            - name: LAB4_GATEWAY_HEALTH_ADDR
+              value: "0.0.0.0:9311"
+            - name: LAB4_COORDINATOR_URL
+              value: "http://lab4-coordinator:9320"
+            - name: LAB4_NAMESPACE
+              value: "lab4"
+            - name: LAB4_GATEWAY_DRAIN_TIMEOUT
+              value: "300s"
+            - name: LAB4_GATEWAY_PRESTOP_DELAY
+              value: "8s"
+          ports:
+            - containerPort: 9310
+              name: tcp-gateway
+            - containerPort: 9311
+              name: http-health
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 9311
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9311
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              httpGet:
+                path: /drain
+                port: 9311
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 128Mi

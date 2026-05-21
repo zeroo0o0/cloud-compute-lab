@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab4-redis
+  namespace: lab4
+spec:
+  selector:
+    app: lab4-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
