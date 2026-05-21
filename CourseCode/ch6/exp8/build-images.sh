@@ -35,12 +35,16 @@ fi
 
 pushd "$SCRIPT_DIR/game-app" >/dev/null
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$DIST_DIR/gateway" ./cmd/server/gateway
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$DIST_DIR/game" ./cmd/server/game
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$DIST_DIR/storage" ./cmd/server/storage
 popd >/dev/null
 
 pushd "$SCRIPT_DIR" >/dev/null
-docker build -f Dockerfile.prebuilt --build-arg SERVICE=gateway -t exp8-gateway:v1 .
-docker tag exp8-gateway:v1 "$IMAGE_PREFIX/exp8-gateway:v1"
-docker push "$IMAGE_PREFIX/exp8-gateway:v1"
+for service in gateway game storage; do
+  docker build -f Dockerfile.prebuilt --build-arg SERVICE="$service" -t "exp8-$service:v1" .
+  docker tag "exp8-$service:v1" "$IMAGE_PREFIX/exp8-$service:v1"
+  docker push "$IMAGE_PREFIX/exp8-$service:v1"
+done
 
 docker pull "$REDIS_SOURCE_IMAGE"
 docker tag "$REDIS_SOURCE_IMAGE" "$IMAGE_PREFIX/redis:v1"
@@ -51,5 +55,7 @@ cat <<EOF
 
 镜像已构建并推送到：
   $IMAGE_PREFIX/exp8-gateway:v1
+  $IMAGE_PREFIX/exp8-game:v1
+  $IMAGE_PREFIX/exp8-storage:v1
   $IMAGE_PREFIX/redis:v1
 EOF
