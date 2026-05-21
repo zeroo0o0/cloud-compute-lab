@@ -1,6 +1,6 @@
 # 实验八：无状态网关与会话重连
 
-本实验演示：**网关只负责连接与路由，玩家会话全部交给 Redis**。  
+本实验演示：**网关只负责连接与路由，玩家会话全部交给 Redis，游戏状态交给 Storage**。  
 因此，即使当前连接所在的 `Gateway-Pod` 被删除，外部客户端也只会短暂断线，随后携带同一个 token 自动连到另一个网关，并从 Redis 中恢复原来的 session。
 
 课堂上要让学生看到三件事：
@@ -19,8 +19,8 @@ exp8/
 ├── build-images.sh              # 构建、标记并推送镜像
 ├── Dockerfile                   # 直接从 Go 源码构建镜像
 ├── Dockerfile.prebuilt          # 使用预编译二进制构建镜像
-├── dist/                        # build-images.sh 生成的 gateway 二进制
-└── game-app/                    # gateway、client、redismini 源码
+├── dist/                        # build-images.sh 生成的 gateway/game/storage 二进制
+└── game-app/                    # gateway、game、storage、client 源码
 ```
 
 ## 0. 登录云上 Kubernetes 集群
@@ -65,6 +65,8 @@ k8s-d   Ready    <none>          10.0.2.12
 
 ```text
 10.0.2.12:5000/exp8/exp8-gateway:v1
+10.0.2.12:5000/exp8/exp8-game:v1
+10.0.2.12:5000/exp8/exp8-storage:v1
 10.0.2.12:5000/exp8/redis:v1
 ```
 
@@ -77,22 +79,16 @@ bash build-images.sh
 脚本会直接使用当前 `exp8` 目录作为 Docker 构建上下文，并依次完成：
 
 ```bash
-docker build -f Dockerfile.prebuilt --build-arg SERVICE=gateway -t exp8-gateway:v1 .
-docker tag exp8-gateway:v1 10.0.2.12:5000/exp8/exp8-gateway:v1
-docker push 10.0.2.12:5000/exp8/exp8-gateway:v1
+for service in gateway game storage; do
+  docker build -f Dockerfile.prebuilt --build-arg SERVICE="$service" -t "exp8-$service:v1" .
+  docker tag "exp8-$service:v1" "10.0.2.12:5000/exp8/exp8-$service:v1"
+  docker push "10.0.2.12:5000/exp8/exp8-$service:v1"
+done
 
 docker pull redis:7-alpine
 docker tag redis:7-alpine 10.0.2.12:5000/exp8/redis:v1
 docker push 10.0.2.12:5000/exp8/redis:v1
 ```
-
-如果 Docker 已经配置好允许访问 HTTP 镜像缓存代理，也可以这样指定 Redis 来源镜像：
-
-```bash
-REDIS_SOURCE_IMAGE="10.0.2.12:5001/library/redis:7-alpine" bash build-images.sh
-```
-
-如果没有配置 Docker 的 insecure registry，直接拉 `10.0.2.12:5001/...` 会出现 `server gave HTTP response to HTTPS client`，这时使用默认脚本即可。
 
 确认本地 Docker 镜像：
 
@@ -101,7 +97,7 @@ docker images | grep exp8
 docker images | grep redis
 ```
 
-## 2. 部署 Redis 和 2 个网关副本
+## 2. 部署 Storage、Game、Redis 和 2 个网关副本
 
 应用 YAML：
 
@@ -113,12 +109,14 @@ kubectl apply -f gateway-session.yaml
 
 ```bash
 kubectl get pods -o wide
-kubectl get svc redis-service gateway-service gateway-service-external
+kubectl get svc storage-service game-service redis-service gateway-service gateway-service-external
 ```
 
 预期能看到：
 
 ```text
+storage-xxxxx    1/1   Running
+game-xxxxx       1/1   Running
 redis-xxxxx      1/1   Running
 gateway-xxxxx    1/1   Running
 gateway-yyyyy    1/1   Running
@@ -141,12 +139,11 @@ gateway-service-external:
 ```
 
 这对应 PPT 里的三件事：
-
 - 网关配置从统一配置源注入。
+- `gateway` 有 2 个副本，客户端连接可能落到任意一个 Gateway-Pod。
 - 网关自身不保存会话，Redis 才是状态源。
 - 外部玩家通过稳定入口访问网关。
 
-如果提示 `provided port is already allocated`，说明集群里已有其他 Service 占用了 `30088`。先清理对应实验，或者临时把 `gateway-session.yaml` 中的 `nodePort` 改成未占用端口。
 
 ## 3. 从集群外部打开客户端连接
 
@@ -169,18 +166,18 @@ kubectl get nodes -o wide
 10.0.2.10:30088
 ```
 
-在 `exp8` 目录直接运行客户端。`exp8/go.work` 已经指向 `game-app` 模块，所以不需要再 `cd game-app`：
+在 `exp8` 目录直接运行可交互游戏客户端。`exp8/go.work` 已经指向 `game-app` 模块，所以不需要再 `cd game-app`：
 
 ```bash
 GATEWAY_ADDR="<Node-IP>:30088" go run ./game-app/cmd/client
 ```
 
-客户端每 1 秒发送一次 heartbeat。你会看到类似：
+客户端会先发送 `HELLO <token> <playerID>` 建立 session，然后每轮用 `GET` 查看位置、用 `MOVE` 移动玩家。你会看到类似：
 
 ```text
-[client] WELCOME gateway=gateway-abcde resumed=false player=student-1 game=game-1 heartbeats=0
-[client] PONG gateway=gateway-abcde heartbeats=1
-[client] PONG gateway=gateway-abcde heartbeats=2
+WELCOME gateway=gateway-abcde resumed=false player=student-1 game=http://game-service:8081 heartbeats=0
+当前位置: x=0,y=0
+请输入方向 (w/a/s/d)、h 心跳、q 退出:
 ```
 
 如果在云服务器 `k8s-a` 上本机验证，推荐优先使用节点内网 IP。如果内网 IP 能通、公网 IP 超时，通常是云服务器安全组或防火墙还没有放行 TCP `30088`。
@@ -203,6 +200,12 @@ TTL session:student-1-token
 你会看到玩家 ID、game server、heartbeat 计数和 TTL。  
 这一步是实验的脊梁：**状态在 Redis，不在某一个 Gateway-Pod 的内存里。**
 
+玩家坐标则在 `storage` 服务里。客户端移动后，可以通过客户端界面看到坐标变化；链路是：
+
+```text
+client GET/MOVE -> gateway -> game HTTP -> storage HTTP
+```
+
 ## 5. 模拟网关突然崩溃
 
 先看客户端当前连的是哪个网关。客户端日志里会显示：
@@ -222,7 +225,7 @@ kubectl delete pod gateway-abcde --force --grace-period=0
 ```text
 [client] disconnected: ...
 [client] connecting addr=... token=student-1-token
-[client] WELCOME gateway=gateway-fghij resumed=true player=student-1 game=game-1 heartbeats=...
+WELCOME gateway=gateway-fghij resumed=true player=student-1 game=http://game-service:8081 heartbeats=...
 ```
 
 关键观察点：
@@ -279,14 +282,16 @@ kubectl get svc gateway-service gateway-service-external
 GATEWAY_ADDR="<NodeIP>:30088" go run ./game-app/cmd/client
 ```
 
-4. 进 Redis 看 session：
+4. 用客户端实际移动一次，确认 `GET/MOVE` 能走完整游戏链路。
+
+5. 进 Redis 看 session：
 
 ```bash
 kubectl exec -it deploy/redis -- redis-cli
 HGETALL session:student-1-token
 ```
 
-5. 删除当前承载连接的 gateway Pod：
+6. 删除当前承载连接的 gateway Pod：
 
 ```bash
 kubectl delete pod <当前网关Pod名> --force --grace-period=0
