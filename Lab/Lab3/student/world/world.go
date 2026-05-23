@@ -608,6 +608,23 @@ func (w *World) RewardPlayer(username string, treasureDelta, victoryDelta int) (
 	return w.profileLocked(player), true
 }
 
+func (w *World) AdjustTreasures(username string, delta int) (protocol.UserProfile, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	player, ok := w.players[username]
+	if !ok {
+		return protocol.UserProfile{}, false
+	}
+	if player.Treasures+delta < 0 {
+		return protocol.UserProfile{}, false
+	}
+	player.Treasures += delta
+	player.LastUpdate = time.Now()
+	w.version++
+	return w.profileLocked(player), true
+}
+
 func (w *World) playerViewLocked(player *Player) protocol.PlayerView {
 	return protocol.PlayerView{
 		Username:   player.Username,

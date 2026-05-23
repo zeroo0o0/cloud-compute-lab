@@ -1,5 +1,0 @@
-FROM scratch
-WORKDIR /app
-COPY .dist/lab4-cloud-map /app/lab4-cloud-map
-EXPOSE 9400
-CMD ["/app/lab4-cloud-map"]

@@ -39,6 +39,7 @@ const (
 	TypeHeal       = "heal"
 	TypeShop       = "shop"
 	TypeSwitchMap  = "switch_map"
+	TypeTransfer   = "transfer"
 	TypeAdmin      = "admin"
 
 	TypeAuth  = "auth"
@@ -107,6 +108,7 @@ type NodeView struct {
 	ID            string   `json:"id"`
 	Addr          string   `json:"addr"`
 	Healthy       bool     `json:"healthy"`
+	Status        string   `json:"status"`
 	PrimaryMaps   []string `json:"primary_maps"`
 	ReplicaMaps   []string `json:"replica_maps"`
 	LastHeartbeat string   `json:"last_heartbeat"`
@@ -143,12 +145,28 @@ type BossView struct {
 	Version   int64      `json:"version"`
 }
 
+type OnlinePlayerView struct {
+	Username string `json:"username"`
+	MapID    string `json:"map_id"`
+	NodeID   string `json:"node_id"`
+}
+
+type MetaView struct {
+	LeaderID     string `json:"leader_id"`
+	LogLength    int    `json:"log_length"`
+	CommitIndex  int    `json:"commit_index"`
+	LeaderTerm   int    `json:"leader_term"`
+	HealthyNodes int    `json:"healthy_nodes"`
+}
+
 type WorldState struct {
 	Self           PlayerView `json:"self"`
 	Map            MapView    `json:"map"`
 	Maps           []MapBrief `json:"maps"`
 	Nodes          []NodeView `json:"nodes"`
 	Boss           BossView   `json:"boss"`
+	OnlinePlayers  []OnlinePlayerView `json:"online_players"`
+	Meta           MetaView   `json:"meta"`
 	Events         []string   `json:"events"`
 	SessionVersion int64      `json:"session_version"`
 }
@@ -204,6 +222,8 @@ type Message struct {
 	NodeID   string      `json:"node_id,omitempty"`
 	Confirm  string      `json:"confirm,omitempty"`
 	Item     string      `json:"item,omitempty"`
+	Target   string      `json:"target,omitempty"`
+	Amount   int         `json:"amount,omitempty"`
 	Text     string      `json:"text,omitempty"`
 	OK       bool        `json:"ok,omitempty"`
 	Error    string      `json:"error,omitempty"`

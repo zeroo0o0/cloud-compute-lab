@@ -129,18 +129,6 @@ func (s *Store) SaveHotSession(session protocol.HotSession) error {
 	return writeJSONAtomic(s.hotFile, s.sessions)
 }
 
-func (s *Store) LoadHotSession(username string) (*protocol.HotSession, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	session, ok := s.sessions[username]
-	if !ok {
-		return nil, false, nil
-	}
-	copySession := session
-	return &copySession, true, nil
-}
-
 func (s *Store) DeleteHotSession(username string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

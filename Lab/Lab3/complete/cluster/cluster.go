@@ -1,29 +1,5 @@
 package cluster
 
-/*
-Lab3 学生 TODO 总览
-
-A-1 一致性哈希：完成 hashring_support.go 中的 Ring.SetMembers、Ring.Locate、Ring.RebalancePlan。
-     游戏作用：决定 green / cave / ruins 三张地图的主节点 owner 和副本 replica。
-
-A-2 Gossip：完成 gossip_support.go 中的 Table.Merge、Table.Targets。
-     游戏作用：维护 node-a / node-b / node-c 的 alive、suspect、dead 成员状态。
-
-A-3 2PC：完成 twopc_support.go 中的 Coordinator.TransferWithParticipants。
-     游戏作用：跨节点转移战利品时，保证双方一起提交或一起回滚。
-
-A-4 Raft：完成 raft_support.go 中的 RequestVote、StartElection、AppendEntries、Propose。
-     游戏作用：节点故障后，地图 owner / replica 元数据变更必须经过多数提交。
-
-C-1 AttackBoss：完成世界 Boss 跨地图共享血量和奖励结算。
-C-2 SwitchMap：完成跨地图切换、玩家迁移和会话路由更新。
-C-3 persistSessionState：完成冷数据 UserProfile 和热数据 HotSession 保存。
-C-4 checkpointLoop / RunCheckpointOnce：完成地图 checkpoint 落盘和副本同步。
-     说明：checkpointLoop 是后台定时循环，RunCheckpointOnce 是测试用的一次性入口，二者属于同一个 C-4。
-C-5 handleNodeFailure：完成副本提升、owner 更新和玩家路由修正。
-C-6 TransferTreasures：完成游戏层跨节点战利品转移，并接入 2PC。
-*/
-
 import (
 	"errors"
 	"fmt"
@@ -533,11 +509,6 @@ func (c *Cluster) BuyItem(username, item string) (*protocol.WorldState, error) {
 }
 
 func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
-	// TODO C-1：完成全服世界首领攻击逻辑。
-	// 要求：先做玩家位置与距离校验，再在集群锁内扣减全局 Boss 血量；
-	// Boss 死亡后要结算所有贡献者奖励，并广播给所有在线玩家。
-	return nil, errors.New("[Lab3-C1] TODO 未实现：AttackBoss，需要完成跨地图共享 Boss 状态更新与全服广播")
-
 	session, node, err := c.sessionNode(username)
 	if err != nil {
 		return nil, err
@@ -643,11 +614,6 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 }
 
 func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, error) {
-	// TODO C-2：完成跨地图切换与路由迁移。
-	// 要求：校验目标地图、禁止倒地切图、从源节点移除玩家、加入目标节点、
-	// 最后更新 session.MapID / session.NodeID 并持久化。
-	return nil, errors.New("[Lab3-C2] TODO 未实现：SwitchMap，需要完成玩家实体迁移与会话路由更新")
-
 	c.mu.RLock()
 	session, ok := c.sessions[username]
 	if !ok {
@@ -886,11 +852,6 @@ func (c *Cluster) broadcastMapEvent(mapID, event string) {
 }
 
 func (c *Cluster) persistSessionState(username string) error {
-	// TODO C-3：完成冷热数据持久化。
-	// 要求：从在线 session 找到当前地图和节点，再从地图节点读取最新玩家状态；
-	// 同时写入冷数据 UserProfile 和热数据 HotSession。
-	return errors.New("[Lab3-C3] TODO 未实现：persistSessionState，需要同时保存冷数据与在线热会话")
-
 	c.mu.RLock()
 	session, ok := c.sessions[username]
 	if !ok {
@@ -1037,11 +998,6 @@ func (c *Cluster) heartbeatLoop() {
 }
 
 func (c *Cluster) checkpointLoop() {
-	// TODO C-4：完成地图检查点与副本同步循环。
-	// 要求：周期性从每张地图的主节点抓取 checkpoint，写入存储，
-	// 并同步到对应副本节点，供故障切换时恢复。
-	return
-
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -1108,11 +1064,6 @@ func (c *Cluster) flushLoop() {
 }
 
 func (c *Cluster) handleNodeFailure(nodeID string) {
-	// TODO C-5：完成节点故障切换。
-	// 要求：找到故障节点承载的主地图，将对应副本提升为新主；
-	// 更新 owner / replica 元数据，修正在线玩家 session.NodeID，并广播切换事件。
-	panic("[Lab3-C5] TODO 未实现：handleNodeFailure，需要提升副本、修正 owner 和在线会话路由")
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -1289,11 +1240,6 @@ func (p *treasureParticipant) Abort(txID string) error {
 }
 
 func (c *Cluster) TransferTreasures(fromUsername, toUsername string, amount int) error {
-	// TODO C-6：完成跨节点战利品转移。
-	// 要求：构造源节点和目标节点的 2PC 参与者，先 prepare，全部成功后 commit；
-	// 任一 prepare 失败时必须 abort，避免只扣一边或只加一边。
-	return errors.New("[Lab3-C6] TODO 未实现：TransferTreasures，需要完成跨节点 2PC 战利品转移")
-
 	if amount <= 0 {
 		return fmt.Errorf("转移战利品数量必须为正数")
 	}

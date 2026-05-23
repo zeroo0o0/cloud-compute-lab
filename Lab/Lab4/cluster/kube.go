@@ -26,6 +26,7 @@ type Metadata struct {
 	Namespace       string            `json:"namespace,omitempty"`
 	ResourceVersion string            `json:"resourceVersion,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
 }
 
 type ConfigMap struct {
@@ -207,6 +208,46 @@ func (c *Client) SaveJSON(ctx context.Context, name, key string, labels map[stri
 	})
 }
 
+func (c *Client) PatchPodAnnotations(ctx context.Context, name string, annotations map[string]string) error {
+	patch := map[string]any{
+		"metadata": map[string]any{
+			"annotations": annotations,
+		},
+	}
+	payload, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.baseURL+c.podPath(name), bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/merge-patch+json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("patch pod %s annotations returned HTTP %d", name, resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *Client) PatchOwnPodAnnotations(ctx context.Context, annotations map[string]string) error {
+	podName := strings.TrimSpace(os.Getenv("POD_NAME"))
+	if podName == "" {
+		podName = strings.TrimSpace(os.Getenv("HOSTNAME"))
+	}
+	if podName == "" {
+		return errors.New("POD_NAME/HOSTNAME is not available")
+	}
+	return c.PatchPodAnnotations(ctx, podName, annotations)
+}
+
 func (c *Client) doJSON(ctx context.Context, method, urlPath string, body any, target any) (int, error) {
 	var reader io.Reader
 	if body != nil {
@@ -251,6 +292,10 @@ func (c *Client) configMapsPath() string {
 
 func (c *Client) configMapPath(name string) string {
 	return fmt.Sprintf("%s/%s", c.configMapsPath(), name)
+}
+
+func (c *Client) podPath(name string) string {
+	return fmt.Sprintf("/api/v1/namespaces/%s/pods/%s", c.namespace, name)
 }
 
 func copyStringMap(in map[string]string) map[string]string {

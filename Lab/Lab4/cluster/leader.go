@@ -22,6 +22,7 @@ type LeaderElector struct {
 	podIP     string
 	port      string
 	ttl       time.Duration
+	eligible  atomic.Value
 	isLeader  atomic.Bool
 	leaderIP  atomic.Value
 	leaderID  atomic.Value
@@ -68,6 +69,10 @@ func (e *LeaderElector) IsLeader() bool {
 	return e.isLeader.Load()
 }
 
+func (e *LeaderElector) SetEligible(fn func() bool) {
+	e.eligible.Store(fn)
+}
+
 func (e *LeaderElector) LeaderIP() string {
 	if value, ok := e.leaderIP.Load().(string); ok {
 		return value
@@ -110,9 +115,21 @@ func (e *LeaderElector) refresh(ctx context.Context) {
 	now := time.Now()
 	expiresAt := now.Add(e.ttl).UTC().Format(time.RFC3339Nano)
 	labels := map[string]string{"app.kubernetes.io/part-of": "lab4", "lab4/component": e.component}
+	eligible := true
+	if value := e.eligible.Load(); value != nil {
+		if fn, ok := value.(func() bool); ok && !fn() {
+			eligible = false
+		}
+	}
 	_ = e.client.UpdateConfigMapData(ctx, e.name, labels, func(data map[string]string) error {
 		currentLeader := data["leaderID"]
 		currentExpiry, _ := time.Parse(time.RFC3339Nano, data["expiresAt"])
+		if !eligible {
+			if currentLeader == e.podName {
+				data["expiresAt"] = now.Add(-time.Second).UTC().Format(time.RFC3339Nano)
+			}
+			return nil
+		}
 		if currentLeader == "" || currentLeader == e.podName || now.After(currentExpiry) {
 			data["leaderID"] = e.podName
 			data["leaderIP"] = e.podIP
@@ -129,7 +146,7 @@ func (e *LeaderElector) refresh(ctx context.Context) {
 	leaderID := cm.Data["leaderID"]
 	leaderIP := cm.Data["leaderIP"]
 	expiry, _ := time.Parse(time.RFC3339Nano, cm.Data["expiresAt"])
-	isCurrent := leaderID == e.podName && time.Now().Before(expiry)
+	isCurrent := eligible && leaderID == e.podName && time.Now().Before(expiry)
 	e.leaderID.Store(leaderID)
 	e.leaderIP.Store(leaderIP)
 	e.isLeader.Store(isCurrent)

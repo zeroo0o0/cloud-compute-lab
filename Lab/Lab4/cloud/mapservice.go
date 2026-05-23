@@ -14,10 +14,11 @@ import (
 )
 
 type MapService struct {
-	mu     sync.Mutex
-	nodeID string
-	world  *world.World
-	events []string
+	mu            sync.Mutex
+	nodeID        string
+	world         *world.World
+	events        []string
+	afterMutation func()
 }
 
 func NewMapService(nodeID, mapID string) (*MapService, error) {
@@ -63,11 +64,22 @@ func (m *MapService) Checkpoint() protocol.MapCheckpoint {
 	return m.world.CaptureCheckpoint(m.nodeID)
 }
 
+func (m *MapService) ActivePlayers() int {
+	players, _, _, _ := m.world.Counts()
+	return players
+}
+
 func (m *MapService) RestoreCheckpoint(cp protocol.MapCheckpoint) {
 	if cp.MapID != "" && cp.MapID != m.world.MapID() {
 		return
 	}
 	m.world.RestoreCheckpoint(cp)
+}
+
+func (m *MapService) SetAfterMutation(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.afterMutation = fn
 }
 
 func (m *MapService) Handler() http.Handler {
@@ -105,6 +117,7 @@ func (m *MapService) handleMap(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		resp = cloudapi.MapResponse{OK: true, Profile: &updated}
+		m.afterMutationHook()
 	case cloudapi.MapActionRemove:
 		profile, ok := m.world.RemovePlayer(req.Username)
 		if !ok {
@@ -112,6 +125,7 @@ func (m *MapService) handleMap(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		resp = cloudapi.MapResponse{OK: true, Profile: &profile}
+		m.afterMutationHook()
 	case cloudapi.MapActionMove:
 		event, profile, ok := m.world.MovePlayer(req.Username, req.Dir)
 		if !ok {
@@ -119,6 +133,7 @@ func (m *MapService) handleMap(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		resp = cloudapi.MapResponse{OK: true, Event: event, Profile: &profile}
+		m.afterMutationHook()
 	case cloudapi.MapActionAttack:
 		event, targetUsername, targetEvent, profile, ok := m.world.Attack(req.Username)
 		if !ok {
@@ -126,6 +141,7 @@ func (m *MapService) handleMap(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		resp = cloudapi.MapResponse{OK: true, Event: event, TargetUsername: targetUsername, TargetEvent: targetEvent, Profile: &profile}
+		m.afterMutationHook()
 	case cloudapi.MapActionHeal:
 		event, profile, ok := m.world.HealPlayer(req.Username)
 		if !ok {
@@ -133,6 +149,7 @@ func (m *MapService) handleMap(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		resp = cloudapi.MapResponse{OK: true, Event: event, Profile: &profile}
+		m.afterMutationHook()
 	case cloudapi.MapActionBuy:
 		event, profile, ok := m.world.BuyItem(req.Username, req.Item)
 		if !ok {
@@ -140,6 +157,7 @@ func (m *MapService) handleMap(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		resp = cloudapi.MapResponse{OK: true, Event: event, Profile: &profile}
+		m.afterMutationHook()
 	case cloudapi.MapActionProfile:
 		profile, ok := m.world.ProfileOf(req.Username)
 		if !ok {
@@ -154,6 +172,7 @@ func (m *MapService) handleMap(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		resp = cloudapi.MapResponse{OK: true, Profile: &profile}
+		m.afterMutationHook()
 	case cloudapi.MapActionAdjust:
 		profile, ok := m.world.AdjustTreasures(req.Username, req.Delta)
 		if !ok {
@@ -161,6 +180,7 @@ func (m *MapService) handleMap(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		resp = cloudapi.MapResponse{OK: true, Profile: &profile}
+		m.afterMutationHook()
 	case cloudapi.MapActionSnapshot:
 		snapshot := m.world.Snapshot(m.nodeID)
 		resp = cloudapi.MapResponse{OK: true, Map: &snapshot}
@@ -183,6 +203,15 @@ func (m *MapService) handleMap(w http.ResponseWriter, r *http.Request) {
 		resp = cloudapi.MapResponse{OK: false, Error: fmt.Sprintf("未知地图动作 %s", req.Action)}
 	}
 	respondJSON(w, resp)
+}
+
+func (m *MapService) afterMutationHook() {
+	m.mu.Lock()
+	fn := m.afterMutation
+	m.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 type MapClient struct {

@@ -73,6 +73,19 @@ func (s *KubeStore) Authenticate(username, password string) (*protocol.UserProfi
 	return &copyUser, nil
 }
 
+func (s *KubeStore) LoadProfile(username string) (*protocol.UserProfile, error) {
+	users, _, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	user, ok := users[username]
+	if !ok {
+		return nil, fmt.Errorf("用户 %q 不存在", username)
+	}
+	copyUser := user
+	return &copyUser, nil
+}
+
 func (s *KubeStore) SaveProfile(profile protocol.UserProfile) error {
 	return s.update(func(users map[string]protocol.UserProfile, sessions map[string]protocol.HotSession) error {
 		existing, ok := users[profile.Username]
@@ -92,6 +105,19 @@ func (s *KubeStore) SaveHotSession(session protocol.HotSession) error {
 		sessions[session.Username] = session
 		return nil
 	})
+}
+
+func (s *KubeStore) LoadHotSession(username string) (*protocol.HotSession, bool, error) {
+	_, sessions, err := s.load()
+	if err != nil {
+		return nil, false, err
+	}
+	session, ok := sessions[username]
+	if !ok {
+		return nil, false, nil
+	}
+	copySession := session
+	return &copySession, true, nil
 }
 
 func (s *KubeStore) DeleteHotSession(username string) error {

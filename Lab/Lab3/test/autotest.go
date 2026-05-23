@@ -1,252 +1,63 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"net"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 )
 
-const serverAddr = "127.0.0.1:9310"
-
-const (
-	TypeRegister   = "register"
-	TypeLogin      = "login"
-	TypeLogout     = "logout"
-	TypeMove       = "move"
-	TypeAttack     = "attack"
-	TypeBossAttack = "boss_attack"
-	TypeSwitchMap  = "switch_map"
-	TypeAdmin      = "admin"
-	TypeAuth       = "auth"
-	TypeState      = "state"
-	TypeError      = "error"
-
-	DirUp    = "up"
-	DirDown  = "down"
-	DirLeft  = "left"
-	DirRight = "right"
-)
-
-type Message struct {
-	Type     string      `json:"type"`
-	Action   string      `json:"action,omitempty"`
-	Username string      `json:"username,omitempty"`
-	Password string      `json:"password,omitempty"`
-	Confirm  string      `json:"confirm,omitempty"`
-	Dir      string      `json:"dir,omitempty"`
-	MapID    string      `json:"map_id,omitempty"`
-	Item     string      `json:"item,omitempty"`
-	NodeID   string      `json:"node_id,omitempty"`
-	Text     string      `json:"text,omitempty"`
-	OK       bool        `json:"ok,omitempty"`
-	Error    string      `json:"error,omitempty"`
-	State    *WorldState `json:"state,omitempty"`
+type testCase struct {
+	Name  string
+	Title string
 }
 
-type PlayerView struct {
-	Username  string `json:"username"`
-	MapID     string `json:"map_id"`
-	X         int    `json:"x"`
-	Y         int    `json:"y"`
-	HP        int    `json:"hp"`
-	MaxHP     int    `json:"max_hp"`
-	Attack    int    `json:"attack"`
-	Potions   int    `json:"potions"`
-	Treasures int    `json:"treasures"`
-	Alive     bool   `json:"alive"`
-	RespawnIn int    `json:"respawn_in"`
+var cases = []testCase{
+	{Name: "TestLab31TopologyAndConsistentHash", Title: "【测试 1】注册登录、拓扑发布与一致性哈希分片"},
+	{Name: "TestLab32MapSwitchAndRouting", Title: "【测试 2】多地图切换与节点路由"},
+	{Name: "TestLab33BossSharedStateAcrossMaps", Title: "【测试 3】世界 Boss 跨地图共享血量"},
+	{Name: "TestLab34TreasureTransferWithTwoPhaseCommit", Title: "【测试 4】跨节点战利品转移与 2PC 回滚"},
+	{Name: "TestLab35CheckpointAndColdHotPersistence", Title: "【测试 5】地图检查点与冷热数据恢复"},
+	{Name: "TestLab36FailoverWithGossipAndRaft", Title: "【测试 6】Gossip 故障发现与 Raft 主从切换"},
 }
-
-type BossSite struct {
-	MapID string `json:"map_id"`
-	X     int    `json:"x"`
-	Y     int    `json:"y"`
-}
-
-type BossView struct {
-	Name      string     `json:"name"`
-	HP        int        `json:"hp"`
-	MaxHP     int        `json:"max_hp"`
-	Alive     bool       `json:"alive"`
-	LastHit   string     `json:"last_hit"`
-	RespawnIn int        `json:"respawn_in"`
-	AttackGap int        `json:"attack_gap"`
-	Sites     []BossSite `json:"sites"`
-}
-
-type MapView struct {
-	ID      string       `json:"id"`
-	Name    string       `json:"name"`
-	NodeID  string       `json:"node_id"`
-	Terrain []string     `json:"terrain"`
-	Players []PlayerView `json:"players"`
-	NPCs    []NPCView    `json:"npcs"` // 加上这行
-}
-
-type NPCView struct {
-	ID    string `json:"id"`
-	X     int    `json:"x"`
-	Y     int    `json:"y"`
-	Alive bool   `json:"alive"`
-}
-
-type MapBrief struct {
-	ID        string `json:"id"`
-	NodeID    string `json:"node_id"`
-	IsCurrent bool   `json:"is_current"`
-}
-
-type NodeView struct {
-	ID      string `json:"id"`
-	Healthy bool   `json:"healthy"`
-}
-
-type WorldState struct {
-	Self           PlayerView `json:"self"`
-	Map            MapView    `json:"map"`
-	Maps           []MapBrief `json:"maps"`
-	Nodes          []NodeView `json:"nodes"`
-	Boss           BossView   `json:"boss"`
-	Events         []string   `json:"events"`
-	SessionVersion int64      `json:"session_version"`
-}
-
-type Client struct {
-	conn  net.Conn
-	enc   *json.Encoder
-	msgCh chan Message
-	errCh chan error
-}
-
-func connect(mode, username, password string, confirm ...string) (*Client, *WorldState, error) {
-	conn, err := net.DialTimeout("tcp", serverAddr, 2*time.Second)
-	if err != nil {
-		return nil, nil, err
-	}
-	client := &Client{
-		conn:  conn,
-		enc:   json.NewEncoder(conn),
-		msgCh: make(chan Message, 128),
-		errCh: make(chan error, 1),
-	}
-
-	go func() {
-		dec := json.NewDecoder(conn)
-		for {
-			var msg Message
-			if err := dec.Decode(&msg); err != nil {
-				client.errCh <- err
-				return
-			}
-			client.msgCh <- msg
-		}
-	}()
-
-	msg := Message{Type: mode, Username: username, Password: password}
-	if len(confirm) > 0 {
-		msg.Confirm = confirm[0]
-	} else if mode == TypeRegister {
-		msg.Confirm = password
-	}
-	if err := client.send(msg); err != nil {
-		return nil, nil, err
-	}
-
-	reply, err := client.recvWithTimeout(3 * time.Second)
-	if err != nil {
-		client.close()
-		return nil, nil, err
-	}
-	if reply.Type == TypeError {
-		client.close()
-		return nil, nil, fmt.Errorf(reply.Error)
-	}
-	if reply.Type != TypeAuth || !reply.OK || reply.State == nil {
-		client.close()
-		return nil, nil, fmt.Errorf("收到异常认证消息：%#v", reply)
-	}
-	return client, reply.State, nil
-}
-
-func sendAdmin(action, nodeID string) (string, error) {
-	conn, err := net.DialTimeout("tcp", serverAddr, 2*time.Second)
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-
-	enc := json.NewEncoder(conn)
-	dec := json.NewDecoder(conn)
-	if err := enc.Encode(Message{Type: TypeAdmin, Action: action, NodeID: nodeID}); err != nil {
-		return "", err
-	}
-
-	var msg Message
-	if err := dec.Decode(&msg); err != nil {
-		return "", err
-	}
-	if msg.Type == TypeError || !msg.OK {
-		return "", fmt.Errorf(msg.Error)
-	}
-	return msg.Text, nil
-}
-
-func (c *Client) send(msg Message) error {
-	return c.enc.Encode(msg)
-}
-
-func (c *Client) recvWithTimeout(d time.Duration) (Message, error) {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case msg := <-c.msgCh:
-		return msg, nil
-	case err := <-c.errCh:
-		return Message{}, err
-	case <-timer.C:
-		return Message{}, fmt.Errorf("等待超时：%s", d)
-	}
-}
-
-func (c *Client) waitState(d time.Duration, predicate func(*WorldState) bool) (*WorldState, error) {
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		msg, err := c.recvWithTimeout(time.Until(deadline))
-		if err != nil {
-			return nil, err
-		}
-		if msg.Type == TypeError {
-			return nil, fmt.Errorf(msg.Error)
-		}
-		if (msg.Type == TypeState || msg.Type == TypeAuth) && msg.State != nil && predicate(msg.State) {
-			return msg.State, nil
-		}
-	}
-	return nil, fmt.Errorf("在 %s 内未等到目标状态", d)
-}
-
-func (c *Client) close() {
-	_ = c.conn.Close()
-}
-
-var (
-	mu     sync.Mutex
-	passed int
-	failed int
-)
 
 func main() {
-	test注册与拓扑()
-	test切图路由()
-	test世界首领跨图协同()
-	// test倒地禁止切图()
-	test持久化恢复()
-	test节点故障切换()
+	srcDir := os.Getenv("LAB3_SRC_DIR")
+	if strings.TrimSpace(srcDir) == "" {
+		cwd, err := os.Getwd()
+		must(err)
+		srcDir = filepath.Join(filepath.Dir(cwd), "student")
+	}
+	cache := os.Getenv("GOCACHE")
+
+	tempDir, err := os.MkdirTemp("", "lab3-test.")
+	must(err)
+	defer os.RemoveAll(tempDir)
+
+	must(os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(fmt.Sprintf("module lab3spec\n\ngo 1.21\n\nrequire battleworld v0.0.0\n\nreplace battleworld => %s\n", filepath.Clean(srcDir))), 0o644))
+	must(os.WriteFile(filepath.Join(tempDir, "lab3_game_test.go"), []byte(gameTestSource), 0o644))
+
+	selected := selectCases(os.Args[1:])
+	passed, failed := 0, 0
+	for _, tc := range selected {
+		fmt.Println(tc.Title)
+		cmd := exec.Command("go", "test", "-run", "^"+tc.Name+"$", "-count=1", "-v")
+		cmd.Dir = tempDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stdout
+		cmd.Env = os.Environ()
+		if cache != "" {
+			cmd.Env = append(cmd.Env, "GOCACHE="+cache)
+		}
+		if err := cmd.Run(); err != nil {
+			failed++
+			fmt.Printf("  ❌ 失败  %v\n", err)
+			continue
+		}
+		passed++
+		fmt.Println("  ✅ 通过")
+	}
 
 	fmt.Printf("\n测试完成：通过 %d 项，失败 %d 项\n", passed, failed)
 	if failed > 0 {
@@ -254,501 +65,360 @@ func main() {
 	}
 }
 
-func check(name string, ok bool, detail string) {
-	mu.Lock()
-	defer mu.Unlock()
-	if ok {
-		passed++
-		fmt.Printf("  ✅ 通过  %s\n", name)
-		return
+func selectCases(args []string) []testCase {
+	if len(args) == 0 {
+		return cases
 	}
-	failed++
-	fmt.Printf("  ❌ 失败  %s -> %s\n", name, detail)
+	lookup := make(map[string]testCase, len(cases))
+	for i, tc := range cases {
+		lookup[fmt.Sprintf("%d", i+1)] = tc
+		lookup[tc.Name] = tc
+	}
+	selected := make([]testCase, 0, len(args))
+	seen := make(map[string]bool)
+	for _, arg := range args {
+		if tc, ok := lookup[arg]; ok && !seen[tc.Name] {
+			selected = append(selected, tc)
+			seen[tc.Name] = true
+		}
+	}
+	if len(selected) == 0 {
+		return cases
+	}
+	return selected
 }
 
-func uniqueUser(prefix string) string {
-	return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
+func must(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
 
-func test注册与拓扑() {
-	fmt.Println("【测试 1】注册登录与拓扑发布")
-	user := uniqueUser("lab3_auth")
-	client, state, err := connect(TypeRegister, user, "pw")
-	if err != nil {
-		check("注册", false, err.Error())
-		return
-	}
-	defer client.close()
+const gameTestSource = `
+package lab3test
 
-	check("初始地图为 green", state.Map.ID == "green", fmt.Sprintf("实际=%s", state.Map.ID))
-	check("发布 3 张地图", len(state.Maps) == 3, fmt.Sprintf("数量=%d", len(state.Maps)))
-	check("发布 3 个节点", len(state.Nodes) == 3, fmt.Sprintf("数量=%d", len(state.Nodes)))
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"battleworld/cluster"
+	"battleworld/protocol"
+	"battleworld/storage"
+	"battleworld/world"
+)
+
+func newClusterForTest(t *testing.T) (*cluster.Cluster, *storage.Store, string) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "lab3")
+	store, err := storage.NewStore(root)
+	if err != nil {
+		t.Fatalf("创建临时存储失败：%v", err)
+	}
+	c, err := cluster.NewCluster(store)
+	if err != nil {
+		t.Fatalf("构造集群失败：%v", err)
+	}
+	return c, store, root
 }
 
-func test切图路由() {
-	fmt.Println("【测试 2】多地图切换与节点路由")
-	user := uniqueUser("lab3_switch")
-	client, _, err := connect(TypeRegister, user, "pw")
-	if err != nil {
-		check("注册", false, err.Error())
-		return
+func TestLab31TopologyAndConsistentHash(t *testing.T) {
+	c, _, root := newClusterForTest(t)
+	if err := c.Register("alice", "pw", "pw"); err != nil {
+		t.Fatalf("注册 alice 失败：%v", err)
 	}
-	defer client.close()
-
-	_ = client.send(Message{Type: TypeSwitchMap, MapID: "cave"})
-	state, err := client.waitState(3*time.Second, func(state *WorldState) bool {
-		return state.Map.ID == "cave"
-	})
+	state, err := c.Login("alice", "pw")
 	if err != nil {
-		check("切换到 cave", false, err.Error())
-		return
+		t.Fatalf("登录 alice 失败：%v", err)
 	}
-	check("cave 由 node-b 承载", state.Map.NodeID == "node-b", fmt.Sprintf("实际=%s", state.Map.NodeID))
-
-	_ = client.send(Message{Type: TypeSwitchMap, MapID: "ruins"})
-	state, err = client.waitState(3*time.Second, func(state *WorldState) bool {
-		return state.Map.ID == "ruins"
-	})
-	if err != nil {
-		check("切换到 ruins", false, err.Error())
-		return
+	if state.Self.Username != "alice" {
+		t.Fatalf("登录后用户名不正确：%+v", state.Self)
 	}
-	check("ruins 由 node-a 承载", state.Map.NodeID == "node-a", fmt.Sprintf("实际=%s", state.Map.NodeID))
-}
-
-func test世界首领跨图协同() {
-	fmt.Println("【测试 3】世界首领跨图共享血量与广播")
-	userA := uniqueUser("lab3_boss_a")
-	userB := uniqueUser("lab3_boss_b")
-
-	clientA, stateA, err := connect(TypeRegister, userA, "pw")
-	if err != nil {
-		check("注册 A", false, err.Error())
-		return
+	if len(state.Nodes) != 3 {
+		t.Fatalf("状态快照中应发布 3 个逻辑节点，实际=%d", len(state.Nodes))
 	}
-	defer clientA.close()
-
-	clientB, _, err := connect(TypeRegister, userB, "pw")
-	if err != nil {
-		check("注册 B", false, err.Error())
-		return
-	}
-	defer clientB.close()
-
-	_ = clientB.send(Message{Type: TypeSwitchMap, MapID: "cave"})
-	stateB, err := clientB.waitState(3*time.Second, func(state *WorldState) bool {
-		return state.Map.ID == "cave"
-	})
-	if err != nil {
-		check("B 切换到 cave", false, err.Error())
-		return
+	if len(state.Maps) != 3 {
+		t.Fatalf("状态快照中应发布 3 张地图，实际=%d", len(state.Maps))
 	}
 
-	stateA, err = walkToBossRange(clientA, stateA)
-	check("A 靠近 green 首领投影", err == nil, errString(err))
-	if err != nil {
-		return
+	briefs := make(map[string]protocol.MapBrief)
+	for _, brief := range state.Maps {
+		briefs[brief.ID] = brief
 	}
-	stateB, err = walkToBossRange(clientB, stateB)
-	check("B 靠近 cave 首领投影", err == nil, errString(err))
-	if err != nil {
-		return
-	}
-
-	initialHP := stateA.Boss.HP
-	damageA := bossDamage(stateA.Self)
-	damageB := bossDamage(stateB.Self)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		_ = clientA.send(Message{Type: TypeBossAttack})
-	}()
-	go func() {
-		defer wg.Done()
-		_ = clientB.send(Message{Type: TypeBossAttack})
-	}()
-	wg.Wait()
-
-	expectedHP := initialHP - damageA - damageB
-	stateA, err = clientA.waitState(5*time.Second, func(state *WorldState) bool {
-		return state.Boss.HP == expectedHP && strings.Contains(strings.Join(state.Events, " "), userA) && strings.Contains(strings.Join(state.Events, " "), userB)
-	})
-	check("A 看到共享血量与广播", err == nil, errString(err))
-	if err != nil {
-		return
-	}
-	stateB, err = clientB.waitState(5*time.Second, func(state *WorldState) bool {
-		return state.Boss.HP == expectedHP && strings.Contains(strings.Join(state.Events, " "), userA) && strings.Contains(strings.Join(state.Events, " "), userB)
-	})
-	check("B 看到共享血量与广播", err == nil, errString(err))
-	if err != nil {
-		return
-	}
-
-	for stateA.Boss.HP > damageB {
-		beforeHP := stateA.Boss.HP
-		beforeVersion := stateA.SessionVersion
-		_ = clientA.send(Message{Type: TypeBossAttack})
-		stateA, err = clientA.waitState(5*time.Second, func(state *WorldState) bool {
-			return state.SessionVersion != beforeVersion && state.Boss.HP < beforeHP
-		})
+	ownerSet := make(map[string]bool)
+	for _, mapID := range []string{"green", "cave", "ruins"} {
+		owner, replica, err := c.MapPlacement(mapID)
 		if err != nil {
-			check("持续压低首领血量", false, err.Error())
-			return
+			t.Fatalf("查询地图 %s 的一致性哈希归属失败：%v", mapID, err)
+		}
+		if owner == "" || replica == "" || owner == replica {
+			t.Fatalf("地图 %s 的主副本归属不正确：owner=%q replica=%q", mapID, owner, replica)
+		}
+		if briefs[mapID].NodeID != owner {
+			t.Fatalf("地图 %s 的展示节点应来自一致性哈希 owner，展示=%s owner=%s", mapID, briefs[mapID].NodeID, owner)
+		}
+		ownerSet[owner] = true
+	}
+	if len(ownerSet) < 2 {
+		t.Fatalf("三张地图不应全部集中在同一个节点，实际 owner 数=%d", len(ownerSet))
+	}
+
+	hot := loadHotSessions(t, root)
+	if _, ok := hot["alice"]; !ok {
+		t.Fatalf("登录后应写入在线热会话")
+	}
+}
+
+func TestLab32MapSwitchAndRouting(t *testing.T) {
+	c, _, _ := newClusterForTest(t)
+	if err := c.Register("alice", "pw", "pw"); err != nil {
+		t.Fatalf("注册 alice 失败：%v", err)
+	}
+	if _, err := c.Login("alice", "pw"); err != nil {
+		t.Fatalf("登录 alice 失败：%v", err)
+	}
+	before, err := c.SnapshotFor("alice")
+	if err != nil {
+		t.Fatalf("获取切图前快照失败：%v", err)
+	}
+	if _, err := c.SwitchMap("alice", "cave"); err != nil {
+		t.Fatalf("切换地图到 cave 失败：%v", err)
+	}
+	after, err := c.SnapshotFor("alice")
+	if err != nil {
+		t.Fatalf("获取切图后快照失败：%v", err)
+	}
+	if before.Self.MapID == after.Self.MapID {
+		t.Fatalf("切图后地图应发生变化，切图前=%s 切图后=%s", before.Self.MapID, after.Self.MapID)
+	}
+	owner, _, err := c.MapPlacement("cave")
+	if err != nil {
+		t.Fatalf("查询 cave owner 失败：%v", err)
+	}
+	if after.Map.NodeID != owner {
+		t.Fatalf("切图后的会话路由应指向 cave 的 owner，实际=%s 期望=%s", after.Map.NodeID, owner)
+	}
+}
+
+func TestLab33BossSharedStateAcrossMaps(t *testing.T) {
+	c, store, _ := newClusterForTest(t)
+	if err := c.Register("alice", "pw", "pw"); err != nil {
+		t.Fatalf("注册 alice 失败：%v", err)
+	}
+	if err := c.Register("bob", "pw", "pw"); err != nil {
+		t.Fatalf("注册 bob 失败：%v", err)
+	}
+	aliceSite := bossSiteForTest(t, "green")
+	bobSite := bossSiteForTest(t, "cave")
+	aliceProfile, _ := store.LoadProfile("alice")
+	aliceProfile.LastMap = "green"
+	aliceProfile.X = aliceSite.X
+	aliceProfile.Y = aliceSite.Y
+	aliceProfile.Attack = 30
+	if err := store.SaveProfile(*aliceProfile); err != nil {
+		t.Fatalf("设置 alice 到 green Boss 附近失败：%v", err)
+	}
+	bobProfile, _ := store.LoadProfile("bob")
+	bobProfile.LastMap = "cave"
+	bobProfile.X = bobSite.X
+	bobProfile.Y = bobSite.Y
+	bobProfile.Attack = 40
+	if err := store.SaveProfile(*bobProfile); err != nil {
+		t.Fatalf("设置 bob 到 cave Boss 附近失败：%v", err)
+	}
+	if _, err := c.Login("alice", "pw"); err != nil {
+		t.Fatalf("登录 alice 失败：%v", err)
+	}
+	if _, err := c.Login("bob", "pw"); err != nil {
+		t.Fatalf("登录 bob 失败：%v", err)
+	}
+	alice, err := c.SnapshotFor("alice")
+	if err != nil {
+		t.Fatalf("获取 alice 快照失败：%v", err)
+	}
+	bob, err := c.SnapshotFor("bob")
+	if err != nil {
+		t.Fatalf("获取 bob 快照失败：%v", err)
+	}
+	if alice.Map.ID != "green" || bob.Map.ID != "cave" {
+		t.Fatalf("测试需要两个玩家位于不同地图，alice=%s bob=%s", alice.Map.ID, bob.Map.ID)
+	}
+	beforeHP := alice.Boss.HP
+	if _, err := c.AttackBoss("alice"); err != nil {
+		t.Fatalf("alice 攻击世界 Boss 失败：%v", err)
+	}
+	if _, err := c.AttackBoss("bob"); err != nil {
+		t.Fatalf("bob 跨地图攻击世界 Boss 失败：%v", err)
+	}
+	alice, _ = c.SnapshotFor("alice")
+	bob, _ = c.SnapshotFor("bob")
+	if alice.Boss.HP != beforeHP-70 {
+		t.Fatalf("两个地图玩家攻击后 Boss 扣血不正确，攻击前=%d 攻击后=%d", beforeHP, alice.Boss.HP)
+	}
+	if alice.Boss.HP != bob.Boss.HP {
+		t.Fatalf("Boss 扣血后仍应全服一致，alice=%d bob=%d", alice.Boss.HP, bob.Boss.HP)
+	}
+}
+
+func TestLab34TreasureTransferWithTwoPhaseCommit(t *testing.T) {
+	c, store, _ := newClusterForTest(t)
+	if err := c.Register("alice", "pw", "pw"); err != nil {
+		t.Fatalf("注册 alice 失败：%v", err)
+	}
+	if err := c.Register("bob", "pw", "pw"); err != nil {
+		t.Fatalf("注册 bob 失败：%v", err)
+	}
+	aliceProfile, _ := store.LoadProfile("alice")
+	aliceProfile.LastMap = "green"
+	aliceProfile.Treasures = 3
+	if err := store.SaveProfile(*aliceProfile); err != nil {
+		t.Fatalf("更新 alice 初始战利品失败：%v", err)
+	}
+	bobProfile, _ := store.LoadProfile("bob")
+	bobProfile.LastMap = "cave"
+	bobProfile.Treasures = 0
+	if err := store.SaveProfile(*bobProfile); err != nil {
+		t.Fatalf("更新 bob 初始战利品失败：%v", err)
+	}
+	if _, err := c.Login("alice", "pw"); err != nil {
+		t.Fatalf("登录 alice 失败：%v", err)
+	}
+	if _, err := c.Login("bob", "pw"); err != nil {
+		t.Fatalf("登录 bob 失败：%v", err)
+	}
+	aliceBefore, _ := c.SnapshotFor("alice")
+	bobBefore, _ := c.SnapshotFor("bob")
+	if aliceBefore.Map.NodeID == bobBefore.Map.NodeID {
+		t.Fatalf("测试需要跨节点交易，alice 节点=%s bob 节点=%s", aliceBefore.Map.NodeID, bobBefore.Map.NodeID)
+	}
+	if err := c.TransferTreasures("alice", "bob", 1); err != nil {
+		t.Fatalf("跨节点战利品转移失败：%v", err)
+	}
+	aliceAfter, _ := c.SnapshotFor("alice")
+	bobAfter, _ := c.SnapshotFor("bob")
+	if aliceAfter.Self.Treasures != aliceBefore.Self.Treasures-1 || bobAfter.Self.Treasures != bobBefore.Self.Treasures+1 {
+		t.Fatalf("2PC 提交后的战利品结果不正确，alice=%d bob=%d", aliceAfter.Self.Treasures, bobAfter.Self.Treasures)
+	}
+	if err := c.TransferTreasures("alice", "bob", 99); err == nil {
+		t.Fatalf("战利品不足时 2PC 应拒绝提交")
+	}
+	aliceRollback, _ := c.SnapshotFor("alice")
+	bobRollback, _ := c.SnapshotFor("bob")
+	if aliceRollback.Self.Treasures != aliceAfter.Self.Treasures || bobRollback.Self.Treasures != bobAfter.Self.Treasures {
+		t.Fatalf("2PC prepare 失败后必须保持双方状态不变，alice=%d bob=%d", aliceRollback.Self.Treasures, bobRollback.Self.Treasures)
+	}
+}
+
+func TestLab35CheckpointAndColdHotPersistence(t *testing.T) {
+	c, _, root := newClusterForTest(t)
+	if err := c.Register("alice", "pw", "pw"); err != nil {
+		t.Fatalf("注册 alice 失败：%v", err)
+	}
+	if _, err := c.Login("alice", "pw"); err != nil {
+		t.Fatalf("登录 alice 失败：%v", err)
+	}
+	if _, err := c.SwitchMap("alice", "cave"); err != nil {
+		t.Fatalf("切换到 cave 失败：%v", err)
+	}
+	checkpointPath := filepath.Join(root, "data", "hot", "checkpoints", "cave.json")
+	if err := os.Remove(checkpointPath); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("清理旧 checkpoint 失败：%v", err)
+	}
+	if err := c.RunCheckpointOnce(); err != nil {
+		t.Fatalf("执行一次 checkpoint 失败：%v", err)
+	}
+	if _, err := os.Stat(checkpointPath); err != nil {
+		t.Fatalf("checkpoint 文件未生成：%v", err)
+	}
+	beforeLogout, _ := c.SnapshotFor("alice")
+	if err := c.Logout("alice"); err != nil {
+		t.Fatalf("退出登录失败：%v", err)
+	}
+	relogin, err := c.Login("alice", "pw")
+	if err != nil {
+		t.Fatalf("重新登录失败：%v", err)
+	}
+	if relogin.Map.ID != "cave" || relogin.Self.X != beforeLogout.Self.X || relogin.Self.Y != beforeLogout.Self.Y {
+		t.Fatalf("冷数据未恢复退出前地图和坐标，退出前=%s(%d,%d) 重登=%s(%d,%d)", beforeLogout.Map.ID, beforeLogout.Self.X, beforeLogout.Self.Y, relogin.Map.ID, relogin.Self.X, relogin.Self.Y)
+	}
+}
+
+func TestLab36FailoverWithGossipAndRaft(t *testing.T) {
+	c, _, _ := newClusterForTest(t)
+	if err := c.Register("alice", "pw", "pw"); err != nil {
+		t.Fatalf("注册 alice 失败：%v", err)
+	}
+	if _, err := c.Login("alice", "pw"); err != nil {
+		t.Fatalf("登录 alice 失败：%v", err)
+	}
+	ownerBefore, replicaBefore, err := c.MapPlacement("green")
+	if err != nil {
+		t.Fatalf("查询 green 布局失败：%v", err)
+	}
+	if replicaBefore == "" {
+		t.Fatalf("green 应存在副本节点")
+	}
+	logBefore := c.MetadataLogLength()
+	text, err := c.ExecuteAdmin("故障", ownerBefore)
+	if err != nil {
+		t.Fatalf("触发故障失败：%v", err)
+	}
+	if !strings.Contains(text, "故障") {
+		t.Fatalf("管理命令应返回故障提示，实际=%s", text)
+	}
+	ownerAfter, _, err := c.MapPlacement("green")
+	if err != nil {
+		t.Fatalf("查询故障后布局失败：%v", err)
+	}
+	if ownerAfter != replicaBefore {
+		t.Fatalf("故障切换后应由原副本接管，实际=%s 期望=%s", ownerAfter, replicaBefore)
+	}
+	status, err := c.MemberStatus(ownerBefore)
+	if err != nil {
+		t.Fatalf("查询故障节点 gossip 状态失败：%v", err)
+	}
+	if status != string(cluster.Dead) {
+		t.Fatalf("故障节点应被 Gossip 成员表标记为 dead，实际=%s", status)
+	}
+	if c.MetadataLeader() == "" {
+		t.Fatalf("故障切换需要 Raft 元数据 leader")
+	}
+	if c.MetadataLogLength() <= logBefore {
+		t.Fatalf("故障切换应通过 Raft 提交新的地图 owner 元数据，提交前日志=%d 提交后=%d", logBefore, c.MetadataLogLength())
+	}
+	after, err := c.SnapshotFor("alice")
+	if err != nil {
+		t.Fatalf("故障后获取玩家快照失败：%v", err)
+	}
+	if after.Map.NodeID != ownerAfter {
+		t.Fatalf("故障后玩家会话路由应修正到新主节点，实际=%s 期望=%s", after.Map.NodeID, ownerAfter)
+	}
+}
+
+func loadHotSessions(t *testing.T, root string) map[string]protocol.HotSession {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, "data", "hot", "sessions.json"))
+	if err != nil {
+		t.Fatalf("读取热会话文件失败：%v；通常说明 persistSessionState 没有写入 HotSession", err)
+	}
+	hot := make(map[string]protocol.HotSession)
+	if err := json.Unmarshal(data, &hot); err != nil {
+		t.Fatalf("解析热会话文件失败：%v", err)
+	}
+	return hot
+}
+
+func bossSiteForTest(t *testing.T, mapID string) protocol.BossSite {
+	t.Helper()
+	for _, cfg := range world.AvailableMaps() {
+		if cfg.ID == mapID {
+			return protocol.BossSite{MapID: mapID, X: cfg.BossX, Y: cfg.BossY}
 		}
 	}
-
-	_ = clientB.send(Message{Type: TypeBossAttack})
-	stateA, err = clientA.waitState(5*time.Second, func(state *WorldState) bool {
-		return !state.Boss.Alive && state.Boss.LastHit == userB && strings.Contains(strings.Join(state.Events, " "), "终结")
-	})
-	check("A 看到 B 终结首领", err == nil, errString(err))
-	if err != nil {
-		return
-	}
-	stateB, err = clientB.waitState(5*time.Second, func(state *WorldState) bool {
-		return !state.Boss.Alive && state.Boss.LastHit == userB && strings.Contains(strings.Join(state.Events, " "), "终结")
-	})
-	check("B 的终结者显示正确", err == nil, errString(err))
+	t.Fatalf("未找到地图 %s", mapID)
+	return protocol.BossSite{}
 }
-
-func test倒地禁止切图() {
-	fmt.Println("【测试 4】倒地状态禁止切换地图")
-	attacker := uniqueUser("lab3_down_a")
-	victim := uniqueUser("lab3_down_b")
-
-	clientA, stateA, err := connect(TypeRegister, attacker, "pw")
-	if err != nil {
-		check("注册攻击者", false, err.Error())
-		return
-	}
-	defer clientA.close()
-
-	clientB, _, err := connect(TypeRegister, victim, "pw")
-	if err != nil {
-		check("注册受击者", false, err.Error())
-		return
-	}
-	defer clientB.close()
-
-	stateA, err = clientA.waitState(3*time.Second, func(state *WorldState) bool {
-		return len(state.Map.Players) >= 2
-	})
-	if err != nil {
-		check("攻击者看到受击者进入地图", false, err.Error())
-		return
-	}
-	target := findPlayer(stateA, victim)
-	if target == nil {
-		check("定位受击者", false, "地图中未找到受击者")
-		return
-	}
-
-	stateA, err = walkToRange(clientA, stateA, target.X, target.Y, 2)
-	check("攻击者靠近受击者", err == nil, errString(err))
-	if err != nil {
-		return
-	}
-
-	var stateB *WorldState
-	for i := 0; i < 6; i++ {
-		_ = clientA.send(Message{Type: TypeAttack})
-		stateB, err = clientB.waitState(5*time.Second, func(state *WorldState) bool {
-			return !state.Self.Alive
-		})
-		if err == nil {
-			break
-		}
-	}
-	check("受击者进入倒地状态", err == nil, errString(err))
-	if err != nil {
-		return
-	}
-
-	beforeVersion := stateB.SessionVersion
-	_ = clientB.send(Message{Type: TypeSwitchMap, MapID: "cave"})
-	stateB, err = clientB.waitState(5*time.Second, func(state *WorldState) bool {
-		return state.SessionVersion > beforeVersion &&
-			state.Map.ID == "green" &&
-			strings.Contains(strings.Join(state.Events, " "), "复活前不能切换地图")
-	})
-	check("倒地时切图被拒绝且留在原地图", err == nil, errString(err))
-	if err != nil {
-		return
-	}
-	check("倒地时地图未变化", stateB.Map.ID == "green", fmt.Sprintf("实际=%s", stateB.Map.ID))
-}
-
-func test持久化恢复() {
-	fmt.Println("【测试 4】退出重登后的冷数据恢复")
-	user := uniqueUser("lab3_persist")
-	client, _, err := connect(TypeRegister, user, "pw")
-	if err != nil {
-		check("注册", false, err.Error())
-		return
-	}
-
-	_ = client.send(Message{Type: TypeSwitchMap, MapID: "cave"})
-	state, err := client.waitState(3*time.Second, func(state *WorldState) bool {
-		return state.Map.ID == "cave"
-	})
-	if err != nil {
-		check("切换到 cave", false, err.Error())
-		client.close()
-		return
-	}
-
-	_ = client.send(Message{Type: TypeMove, Dir: DirDown})
-	_ = client.send(Message{Type: TypeMove, Dir: DirDown})
-	state, err = client.waitState(3*time.Second, func(state *WorldState) bool {
-		return state.Map.ID == "cave" && state.Self.Y >= 22
-	})
-	if err != nil {
-		check("在 cave 中移动", false, err.Error())
-		client.close()
-		return
-	}
-	savedX, savedY := state.Self.X, state.Self.Y
-
-	_ = client.send(Message{Type: TypeLogout})
-	client.close()
-	time.Sleep(300 * time.Millisecond)
-
-	client2, state2, err := connect(TypeLogin, user, "pw")
-	if err != nil {
-		check("重新登录", false, err.Error())
-		return
-	}
-	defer client2.close()
-
-	check("地图恢复成功", state2.Map.ID == "cave", fmt.Sprintf("实际=%s", state2.Map.ID))
-	check("坐标恢复成功", state2.Self.X == savedX && state2.Self.Y == savedY,
-		fmt.Sprintf("期望=(%d,%d) 实际=(%d,%d)", savedX, savedY, state2.Self.X, state2.Self.Y))
-	check("事件日志不为空", len(strings.Join(state2.Events, "")) > 0, "日志为空")
-}
-
-func test节点故障切换() {
-	fmt.Println("【测试 5】管理命令触发故障切换与恢复")
-	user := uniqueUser("lab3_failover")
-	client, _, err := connect(TypeRegister, user, "pw")
-	if err != nil {
-		check("注册", false, err.Error())
-		return
-	}
-	defer client.close()
-
-	text, err := sendAdmin("故障", "node-a")
-	check("发送故障命令", err == nil, errString(err))
-	if err != nil {
-		return
-	}
-	check("故障命令返回成功文本", strings.Contains(text, "故障"), text)
-
-	state, err := client.waitState(4*time.Second, func(state *WorldState) bool {
-		return state.Map.ID == "green" && state.Map.NodeID == "node-c"
-	})
-	if err != nil {
-		check("green 漂移到 node-c", false, err.Error())
-		return
-	}
-	check("green 主节点切换为 node-c", state.Map.NodeID == "node-c", fmt.Sprintf("实际=%s", state.Map.NodeID))
-
-	text, err = sendAdmin("恢复", "node-a")
-	check("发送恢复命令", err == nil, errString(err))
-	if err != nil {
-		return
-	}
-	check("恢复命令返回成功文本", strings.Contains(text, "恢复"), text)
-
-	state, err = client.waitState(4*time.Second, func(state *WorldState) bool {
-		for _, node := range state.Nodes {
-			if node.ID == "node-a" && node.Healthy {
-				return true
-			}
-		}
-		return false
-	})
-	if err != nil {
-		check("node-a 恢复在线", false, err.Error())
-		return
-	}
-	check("node-a 在线恢复成功", true, "")
-}
-
-func bossSite(state *WorldState, mapID string) *BossSite {
-	for _, site := range state.Boss.Sites {
-		if site.MapID == mapID {
-			copySite := site
-			return &copySite
-		}
-	}
-	return nil
-}
-
-func errString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}
-
-func walkToBossRange(client *Client, state *WorldState) (*WorldState, error) {
-	site := bossSite(state, state.Map.ID)
-	if site == nil {
-		return nil, fmt.Errorf("地图 %s 未找到首领投影", state.Map.ID)
-	}
-	return walkToRange(client, state, site.X, site.Y, state.Boss.AttackGap)
-}
-
-func walkToRange(client *Client, state *WorldState, targetX, targetY, attackGap int) (*WorldState, error) {
-	current := state
-	moved := 0
-
-	for moved < 500 {
-		if manhattan(current.Self.X, current.Self.Y, targetX, targetY) <= attackGap {
-			return current, nil
-		}
-
-		path, ok := buildPath(current.Map.Terrain, current.Self.X, current.Self.Y, current.Map.NPCs, func(x, y int) bool {
-			return manhattan(x, y, targetX, targetY) <= attackGap
-		})
-
-		if !ok || len(path) == 0 {
-			// 路被 NPC 堵死，等状态更新（NPC 移动后立刻重试）
-			next, err := client.waitState(2*time.Second, func(s *WorldState) bool {
-				return s.SessionVersion != current.SessionVersion
-			})
-			if err != nil {
-				return nil, fmt.Errorf("等待超时：%v", err)
-			}
-			current = next
-			continue
-		}
-
-		beforeVersion := current.SessionVersion
-		beforeX, beforeY := current.Self.X, current.Self.Y
-		_ = client.send(Message{Type: TypeMove, Dir: path[0]})
-		next, err := client.waitState(3*time.Second, func(s *WorldState) bool {
-			return s.SessionVersion != beforeVersion
-		})
-		if err != nil {
-			return nil, err
-		}
-		current = next
-
-		if current.Self.X != beforeX || current.Self.Y != beforeY {
-			moved++
-		}
-		// 被挡住不等待，直接重新规划路径
-	}
-	return nil, fmt.Errorf("移动步数超限，未能抵达目标区域")
-}
-
-func buildPath(terrain []string, startX, startY int, npcs []NPCView, goal func(x, y int) bool) ([]string, bool) {
-	if len(terrain) == 0 || len(terrain[0]) == 0 {
-		return nil, false
-	}
-
-	// 把 NPC 位置建成集合
-	blocked := map[[2]int]bool{}
-	for _, npc := range npcs {
-		if npc.Alive {
-			blocked[[2]int{npc.X, npc.Y}] = true
-		}
-	}
-
-	type point struct {
-		x int
-		y int
-	}
-	dirs := []struct {
-		name string
-		dx   int
-		dy   int
-	}{
-		{name: DirUp, dx: 0, dy: -1},
-		{name: DirDown, dx: 0, dy: 1},
-		{name: DirLeft, dx: -1, dy: 0},
-		{name: DirRight, dx: 1, dy: 0},
-	}
-
-	start := point{x: startX, y: startY}
-	if goal(startX, startY) {
-		return []string{}, true
-	}
-
-	queue := []point{start}
-	visited := map[point]bool{start: true}
-	prev := make(map[point]point)
-	prevDir := make(map[point]string)
-
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, dir := range dirs {
-			next := point{x: cur.x + dir.dx, y: cur.y + dir.dy}
-			if next.y < 0 || next.y >= len(terrain) || next.x < 0 || next.x >= len(terrain[next.y]) {
-				continue
-			}
-			if terrain[next.y][next.x] == '#' || visited[next] {
-				continue
-			}
-			// 目标格本身允许（即使有 NPC，因为攻击范围不需要真正踏上目标格）
-			// 中间路径格不能有 NPC
-			if blocked[[2]int{next.x, next.y}] && !goal(next.x, next.y) {
-				continue
-			}
-			visited[next] = true
-			prev[next] = cur
-			prevDir[next] = dir.name
-			if goal(next.x, next.y) {
-				path := []string{}
-				for at := next; at != start; at = prev[at] {
-					path = append(path, prevDir[at])
-				}
-				reverseStrings(path)
-				return path, true
-			}
-			queue = append(queue, next)
-		}
-	}
-	return nil, false
-}
-
-func reverseStrings(items []string) {
-	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
-		items[i], items[j] = items[j], items[i]
-	}
-}
-
-func findPlayer(state *WorldState, username string) *PlayerView {
-	for _, player := range state.Map.Players {
-		if player.Username == username {
-			copyPlayer := player
-			return &copyPlayer
-		}
-	}
-	return nil
-}
-
-func bossDamage(player PlayerView) int {
-	damage := player.Attack + player.Treasures/2
-	if damage < 20 {
-		return 20
-	}
-	return damage
-}
-
-func manhattan(ax, ay, bx, by int) int {
-	dx := ax - bx
-	if dx < 0 {
-		dx = -dx
-	}
-	dy := ay - by
-	if dy < 0 {
-		dy = -dy
-	}
-	return dx + dy
-}
+`

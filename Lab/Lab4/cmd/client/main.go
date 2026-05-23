@@ -37,22 +37,116 @@ var (
 	transferAmount = 1
 )
 
+type authSession struct {
+	Username string
+	Password string
+}
+
 func main() {
 	reader := bufio.NewReader(os.Stdin)
-	addr := chooseGateway(reader)
+	addr := ""
+	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
+		addr = strings.TrimSpace(os.Args[1])
+	}
+	if addr == "" {
+		addr = chooseGateway(reader)
+	}
 
 	var conn *protocol.Conn
 	var state *protocol.WorldState
+	var session authSession
 	var err error
 	for {
 		mode, username, password, confirm := chooseAuth(reader)
 		conn, state, err = auth(addr, mode, username, password, confirm)
 		if err == nil {
+			session = authSession{Username: username, Password: password}
 			break
 		}
 		fmt.Printf("%s进入失败：%v%s\n", colorRed, err, colorReset)
 	}
-	defer conn.Close()
+
+	var connMu sync.Mutex
+	var reconnectMu sync.Mutex
+	var stopOnce sync.Once
+	stopping := make(chan struct{})
+
+	getConn := func() *protocol.Conn {
+		connMu.Lock()
+		defer connMu.Unlock()
+		return conn
+	}
+	sameConn := func(target *protocol.Conn) bool {
+		connMu.Lock()
+		defer connMu.Unlock()
+		return conn == target
+	}
+	replaceConn := func(next *protocol.Conn) {
+		connMu.Lock()
+		old := conn
+		conn = next
+		connMu.Unlock()
+		if old != nil && old != next {
+			_ = old.Close()
+		}
+	}
+	closeCurrentConn := func() {
+		connMu.Lock()
+		old := conn
+		conn = nil
+		connMu.Unlock()
+		if old != nil {
+			_ = old.Close()
+		}
+	}
+	stopClient := func() {
+		stopOnce.Do(func() {
+			close(stopping)
+			closeCurrentConn()
+		})
+	}
+	sendCurrent := func(msg protocol.Message) error {
+		currentConn := getConn()
+		if currentConn == nil {
+			return fmt.Errorf("连接未建立")
+		}
+		return currentConn.Send(msg)
+	}
+	reconnect := func(reason string) bool {
+		reconnectMu.Lock()
+		defer reconnectMu.Unlock()
+
+		select {
+		case <-stopping:
+			return false
+		default:
+		}
+
+		addClientNote(reason + "，正在自动重连...")
+		drawUI()
+		for attempt := 1; ; attempt++ {
+			next, nextState, err := auth(addr, protocol.TypeLogin, session.Username, session.Password, "")
+			if err == nil {
+				replaceConn(next)
+				setState(nextState)
+				addClientNote("已自动重连并恢复状态")
+				drawUI()
+				return true
+			}
+			addClientNote(fmt.Sprintf("自动重连失败 %d 次：%v", attempt, err))
+			drawUI()
+
+			wait := minDuration(3*time.Second, time.Duration(attempt)*500*time.Millisecond)
+			timer := time.NewTimer(wait)
+			select {
+			case <-timer.C:
+			case <-stopping:
+				timer.Stop()
+				return false
+			}
+		}
+	}
+	defer stopClient()
 
 	restoreTTY, err := enterRawMode()
 	if err != nil {
@@ -71,11 +165,24 @@ func main() {
 	go func() {
 		defer close(done)
 		for {
-			msg, err := conn.Receive()
-			if err != nil {
-				addClientNote("与网关连接已断开")
-				drawUI()
+			currentConn := getConn()
+			if currentConn == nil {
 				return
+			}
+			msg, err := currentConn.Receive()
+			if err != nil {
+				select {
+				case <-stopping:
+					return
+				default:
+				}
+				if !sameConn(currentConn) {
+					continue
+				}
+				if !reconnect("与网关连接断开") {
+					return
+				}
+				continue
 			}
 			switch msg.Type {
 			case protocol.TypeAuth, protocol.TypeState:
@@ -102,7 +209,8 @@ func main() {
 			return
 		}
 		if key == 3 {
-			_ = conn.Send(protocol.Message{Type: protocol.TypeLogout})
+			_ = sendCurrent(protocol.Message{Type: protocol.TypeLogout})
+			stopClient()
 			return
 		}
 
@@ -222,7 +330,8 @@ func main() {
 				drawUI()
 				continue
 			case 'q', 'Q':
-				_ = conn.Send(protocol.Message{Type: protocol.TypeLogout})
+				_ = sendCurrent(protocol.Message{Type: protocol.TypeLogout})
+				stopClient()
 				return
 			default:
 				continue
@@ -230,10 +339,13 @@ func main() {
 		}
 
 		addClientNote(note)
-		if err := conn.Send(msg); err != nil {
-			addClientNote("指令发送失败")
-			drawUI()
-			return
+		if err := sendCurrent(msg); err != nil {
+			if !reconnect("指令发送失败") {
+				return
+			}
+			if err := sendCurrent(msg); err != nil {
+				addClientNote("重连后指令仍发送失败，请稍后重试")
+			}
 		}
 		drawUI()
 	}
@@ -684,6 +796,13 @@ func manhattan(ax, ay, bx, by int) int {
 
 func max(a, b int) int {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
 		return a
 	}
 	return b

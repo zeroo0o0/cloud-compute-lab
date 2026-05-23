@@ -28,7 +28,9 @@ type Session struct {
 type Store interface {
 	Register(username, password string) error
 	Authenticate(username, password string) (*protocol.UserProfile, error)
+	LoadProfile(username string) (*protocol.UserProfile, error)
 	SaveProfile(profile protocol.UserProfile) error
+	LoadHotSession(username string) (*protocol.HotSession, bool, error)
 	SaveHotSession(session protocol.HotSession) error
 	DeleteHotSession(username string) error
 }
@@ -91,6 +93,12 @@ func (c *Coordinator) Handler() http.Handler {
 	})
 	mux.HandleFunc("/v1/coordinator", c.handleCoordinator)
 	return mux
+}
+
+func (c *Coordinator) ActivePlayers() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.sessions)
 }
 
 func (c *Coordinator) handleCoordinator(w http.ResponseWriter, r *http.Request) {
@@ -173,9 +181,11 @@ func (c *Coordinator) Login(username, password string) (*protocol.WorldState, er
 	}
 
 	c.mu.Lock()
-	if _, ok := c.sessions[username]; ok {
+	if session, ok := c.sessions[username]; ok {
+		c.pushEventLocked(session, "检测到连接恢复，已接管原有会话")
 		c.mu.Unlock()
-		return nil, fmt.Errorf("用户 %q 已经在线", username)
+		_ = c.persistSessionState(username)
+		return c.SnapshotFor(username)
 	}
 	mapID := profile.LastMap
 	if _, ok := c.configs[mapID]; !ok {
@@ -366,7 +376,12 @@ func (c *Coordinator) SnapshotFor(username string) (*protocol.WorldState, error)
 	session, ok := c.sessions[username]
 	if !ok {
 		c.mu.RUnlock()
-		return nil, fmt.Errorf("用户 %q 当前不在线", username)
+		restored, err := c.restoreSession(username)
+		if err != nil {
+			return nil, err
+		}
+		session = restored
+		c.mu.RLock()
 	}
 	client := c.maps[session.MapID]
 	events := append([]string(nil), session.Events...)
@@ -693,17 +708,94 @@ func (c *Coordinator) flushLoop() {
 
 func (c *Coordinator) sessionMap(username string) (*Session, *MapClient, error) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	session, ok := c.sessions[username]
 	if !ok {
-		return nil, nil, fmt.Errorf("用户 %q 当前不在线", username)
+		c.mu.RUnlock()
+		restored, err := c.restoreSession(username)
+		if err != nil {
+			return nil, nil, err
+		}
+		session = restored
+		c.mu.RLock()
 	}
 	client := c.maps[session.MapID]
 	if client == nil {
+		c.mu.RUnlock()
 		return nil, nil, fmt.Errorf("地图 %s 当前无服务", session.MapID)
 	}
 	copySession := *session
+	c.mu.RUnlock()
 	return &copySession, client, nil
+}
+
+func (c *Coordinator) restoreSession(username string) (*Session, error) {
+	if username == "" {
+		return nil, errors.New("用户名不能为空")
+	}
+	c.mu.RLock()
+	if session, ok := c.sessions[username]; ok {
+		copySession := *session
+		c.mu.RUnlock()
+		return &copySession, nil
+	}
+	c.mu.RUnlock()
+
+	hot, ok, err := c.store.LoadHotSession(username)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := c.store.LoadProfile(username)
+	if err != nil {
+		return nil, err
+	}
+
+	mapID := profile.LastMap
+	nodeID := profile.LastNode
+	version := int64(1)
+	if ok {
+		mapID = hot.MapID
+		nodeID = hot.NodeID
+		version = max64(1, hot.SessionVersion+1)
+	}
+	if _, ok := c.configs[mapID]; !ok {
+		mapID = world.DefaultMapID()
+	}
+	client := c.maps[mapID]
+	if client == nil {
+		return nil, fmt.Errorf("地图 %s 当前无服务", mapID)
+	}
+	if _, err := client.Profile(username); err != nil {
+		profile.LastMap = mapID
+		profile.LastNode = client.NodeID
+		if _, err := client.AddOrRestorePlayer(profile); err != nil {
+			return nil, err
+		}
+	}
+	if nodeID == "" {
+		nodeID = client.NodeID
+	}
+
+	c.mu.Lock()
+	if session, exists := c.sessions[username]; exists {
+		copySession := *session
+		c.mu.Unlock()
+		return &copySession, nil
+	}
+	session := &Session{
+		Username: username,
+		MapID:    mapID,
+		NodeID:   nodeID,
+		Version:  version,
+		Events: []string{
+			"服务实例已迁移，正在恢复原有会话",
+			fmt.Sprintf("当前地图 %s 由 %s 承载", mapID, client.NodeID),
+		},
+	}
+	c.sessions[username] = session
+	copySession := *session
+	c.mu.Unlock()
+	_ = c.persistSessionState(username)
+	return &copySession, nil
 }
 
 func (c *Coordinator) pushEvent(username, event string) {
@@ -815,6 +907,13 @@ func (b *BossState) viewLocked() protocol.BossView {
 }
 
 func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func max64(a, b int64) int64 {
 	if a > b {
 		return a
 	}

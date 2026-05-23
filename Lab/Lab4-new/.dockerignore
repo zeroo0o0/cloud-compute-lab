@@ -1,7 +1,0 @@
-.DS_Store
-.git
-.gocache
-.dist/images
-*.tar
-*.tar.gz
-*.log
