@@ -15,6 +15,7 @@ import (
 
 func main() {
 	dataRoot := resolveDataRoot()
+	gatewayAddr := resolveGatewayAddr()
 	store, err := storage.NewStore(dataRoot)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "初始化存储失败：%v\n", err)
@@ -31,14 +32,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	ln, err := net.Listen("tcp", protocol.GatewayAddr)
+	ln, err := net.Listen("tcp", gatewayAddr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "网关监听失败：%v\n", err)
 		os.Exit(1)
 	}
 	defer ln.Close()
 
-	fmt.Printf("网关已启动：%s\n", protocol.GatewayAddr)
+	fmt.Printf("网关已启动：%s\n", gatewayAddr)
 	fmt.Println("控制面节点：node-a=9311 node-b=9312 node-c=9313")
 
 	for {
@@ -56,6 +57,13 @@ func resolveDataRoot() string {
 		return root
 	}
 	return "."
+}
+
+func resolveGatewayAddr() string {
+	if addr := strings.TrimSpace(os.Getenv("LAB3_GATEWAY_ADDR")); addr != "" {
+		return addr
+	}
+	return protocol.GatewayAddr
 }
 
 func handleClient(gameCluster *cluster.Cluster, raw net.Conn) {
@@ -161,6 +169,11 @@ func handleClient(gameCluster *cluster.Cluster, raw net.Conn) {
 			next, err = gameCluster.Heal(username)
 		case protocol.TypeShop:
 			next, err = gameCluster.BuyItem(username, msg.Item)
+		case protocol.TypeTransfer:
+			err = gameCluster.TransferTreasures(username, msg.Target, msg.Amount)
+			if err == nil {
+				next, err = gameCluster.SnapshotFor(username)
+			}
 		case protocol.TypeSwitchMap:
 			next, err = gameCluster.SwitchMap(username, msg.MapID)
 		case protocol.TypeLogout:
