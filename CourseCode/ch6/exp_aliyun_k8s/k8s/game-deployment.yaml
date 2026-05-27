@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game-deployment
+  labels:
+    app: game
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: game
+  template:
+    metadata:
+      labels:
+        app: game
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: game
+                topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: game
+      containers:
+        - name: game
+          # Image pushed to local registry (example)
+          image: 10.0.2.12:5000/exp_aliyun_k8s/game-service:v1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GAME_ADDR
+              value: "0.0.0.0:8081"
+            - name: STORAGE_URL
+              value: "http://storage:8082"
+          ports:
+            - containerPort: 8081
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"

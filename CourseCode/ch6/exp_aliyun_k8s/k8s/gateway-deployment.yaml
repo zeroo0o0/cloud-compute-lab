@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-deployment
+  labels:
+    app: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          # Image pushed to local registry (example)
+          image: 10.0.2.12:5000/exp_aliyun_k8s/game-gateway:v1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GATEWAY_ADDR
+              value: "0.0.0.0:8080"
+            - name: GAME_URL
+              value: "http://game:8081"
+          ports:
+            - containerPort: 8080
