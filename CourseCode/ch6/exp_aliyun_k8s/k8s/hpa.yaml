@@ -8,24 +8,29 @@ spec:
     kind: Deployment
     name: game-deployment
   minReplicas: 1
-  maxReplicas: 6
+  maxReplicas: 12
   metrics:
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: 50
+          averageUtilization: 30
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 0
+      selectPolicy: Max
       policies:
         - type: Pods
-          value: 4
-          periodSeconds: 15
+          value: 6
+          periodSeconds: 10
+        - type: Percent
+          value: 200
+          periodSeconds: 10
     scaleDown:
-      stabilizationWindowSeconds: 30
+      stabilizationWindowSeconds: 15
+      selectPolicy: Max
       policies:
         - type: Percent
           value: 100
-          periodSeconds: 30
+          periodSeconds: 15

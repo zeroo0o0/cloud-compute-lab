@@ -125,28 +125,68 @@ func resolveClientID() string {
 	return fmt.Sprintf("client-%d", os.Getpid())
 }
 
-func main() {
-	defaultURL := "127.0.0.1:8080"
-	if envURL := strings.TrimSpace(os.Getenv("CLIENT_SERVER_URL")); envURL != "" {
-		defaultURL = envURL
+func parseAddrList(input string) []string {
+	parts := strings.Split(input, ",")
+	addrs := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		addrs = append(addrs, trimmed)
 	}
+	return addrs
+}
+
+func resolveGatewayAddrs() []string {
+	if envURLs := strings.TrimSpace(os.Getenv("CLIENT_SERVER_URLS")); envURLs != "" {
+		if addrs := parseAddrList(envURLs); len(addrs) > 0 {
+			return addrs
+		}
+	}
+	if envURL := strings.TrimSpace(os.Getenv("CLIENT_SERVER_URL")); envURL != "" {
+		return []string{envURL}
+	}
+	return []string{"127.0.0.1:8080"}
+}
+
+func sendCommandWithFailover(addrs []string, cmd string) ([]string, error) {
+	var lastErr error
+	for _, addr := range addrs {
+		lines, err := sendCommand(addr, cmd)
+		if err == nil {
+			return lines, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no gateway address available")
+	}
+	return nil, lastErr
+}
+
+func main() {
+	defaultAddrs := resolveGatewayAddrs()
 
 	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Printf("网关地址 (默认 %s): ", defaultURL)
+	fmt.Printf("网关地址 (默认 %s): ", strings.Join(defaultAddrs, ","))
 	inputURL, ok := readLine(scanner)
 	if !ok {
 		return
 	}
-	baseURL := defaultURL
+	addrs := defaultAddrs
 	if inputURL != "" {
-		baseURL = inputURL
+		addrs = parseAddrList(inputURL)
+		if len(addrs) == 0 {
+			addrs = defaultAddrs
+		}
 	}
 	clientID := resolveClientID()
 	fmt.Printf("客户端ID: %s\n", clientID)
 
 	for {
 		// 1. 先向网关发送 GET <clientId>，由网关转发为 /player?clientId=... 查询当前位置
-		respLines, err := sendCommand(baseURL, fmt.Sprintf("GET %s", clientID))
+		respLines, err := sendCommandWithFailover(addrs, fmt.Sprintf("GET %s", clientID))
 		if err != nil {
 			if msg := firstResultErr(respLines); msg != "" {
 				fmt.Printf("GET失败: %s\n", msg)
@@ -184,7 +224,7 @@ func main() {
 				continue
 			}
 
-			moveLines, moveErr := sendCommand(baseURL, fmt.Sprintf("MOVE %s %s", clientID, dir))
+			moveLines, moveErr := sendCommandWithFailover(addrs, fmt.Sprintf("MOVE %s %s", clientID, dir))
 			if moveErr != nil {
 				if msg := firstResultErr(moveLines); msg != "" {
 					fmt.Printf("MOVE失败: %s\n", msg)

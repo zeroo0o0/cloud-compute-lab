@@ -97,6 +97,13 @@ $env:CLIENT_SERVER_URL="127.0.0.1:18080"
 go run ./cmd/client
 ```
 
+> 可选：支持多个网关地址自动切换（逗号分隔），例如：
+>
+> ```powershell
+> $env:CLIENT_SERVER_URLS="127.0.0.1:18080,127.0.0.1:18081"
+> go run ./cmd/client
+> ```
+
 > `data/players.log` 会在宿主机持久化，符合 exp2 要求。
 
 ## 4. 进入容器排查（exp3）
