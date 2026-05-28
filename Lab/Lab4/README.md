@@ -1,12 +1,12 @@
 # Lab4：自建 Kubernetes 游戏部署实验
 
-本实验要求你把一个分布式文字游戏部署到自己配置的 Kubernetes 集群上，并让它具备自动扩缩容、基础故障恢复、状态一致性和较好的资源利用率。
+本实验要求你把一个分布式文字游戏部署到自己配置的 Kubernetes 集群上，并让它具备自动扩缩容、基础异常恢复、状态一致性和较好的资源利用率。
 
 ---
 
 **【重要评分导向】**
 
-**本实验不鼓励无脑堆机器。功能正确、服务稳定是基础；在此前提下，花费越少、实验得分越高。**
+**本实验不鼓励简单堆叠资源。功能正确、服务稳定是基础；在此前提下，花费越少、实验得分越高。**
 
 ---
 
@@ -17,7 +17,7 @@
 | 名称 | 含义 |
 | --- | --- |
 | 本机 | 你自己的电脑，例如 Windows、macOS 或 Linux 笔记本 |
-| 主节点 | Kubernetes control-plane 节点，通常有公网 IP，可以从本机 SSH 登录 |
+| 主节点 | Kubernetes control-plane 节点，通常可以从本机远程登录 |
 | worker 节点 | Kubernetes 工作节点，通常只有内网 IP，Pod 主要运行在这些节点上 |
 | 集群节点 | 主节点和 worker 节点的统称 |
 
@@ -27,7 +27,7 @@
 
 ```text
 命名空间：lab4
-公网入口：<任意可访问 Node 的公网 IP>:30910
+外部入口：<可访问的节点地址>:30910
 
 业务组件：
 lab4-gateway
@@ -49,13 +49,13 @@ Redis 不需要配置 HPA
 部署完成后，客户端应该可以通过下面的地址连接游戏：
 
 ```text
-<公网IP>:30910
+<节点地址>:30910
 ```
 
 例如：
 
 ```text
-120.79.8.174:30910
+203.0.113.10:30910
 ```
 
 ## 2. 前置资料
@@ -74,9 +74,9 @@ Redis 不需要配置 HPA
 
 kubeconfig 是 `kubectl` 连接 Kubernetes 集群时使用的配置文件。它里面记录了 API Server 地址、证书和访问凭据。
 
-配置本机 kubeconfig 的好处是：你可以直接在自己的电脑上运行 `kubectl get pods`、`kubectl apply -f ...`、`watch ...` 等命令，不用每次都 SSH 到主节点。
+配置本机 kubeconfig 的好处是：你可以直接在自己的电脑上运行 `kubectl get pods`、`kubectl apply -f ...`、`watch ...` 等命令，不用每次都远程登录到主节点。
 
-这一步是可选的。即使你没有配置本机 kubeconfig，也不影响基础测试和评分脚本；测试脚本会在需要时退回 SSH 模式，让你输入主节点公网 IP、SSH 用户、端口等信息。
+这一步是可选的。即使你没有配置本机 kubeconfig，也不影响基础测试和评分脚本；测试脚本会在需要时退回远程登录模式，让你输入主节点地址、登录用户名、连接端口等信息。
 
 如果你想在本机直接控制集群，可以按下面流程尝试。
 
@@ -88,7 +88,7 @@ Linux/macOS：
 
 ```bash
 mkdir -p ~/.kube
-scp root@<主节点公网IP>:/etc/kubernetes/admin.conf ~/.kube/config
+scp <服务器用户名>@<主节点地址>:/etc/kubernetes/admin.conf ~/.kube/config
 chmod 600 ~/.kube/config
 ```
 
@@ -96,7 +96,7 @@ Windows PowerShell：
 
 ```powershell
 mkdir $HOME\.kube
-scp root@<主节点公网IP>:/etc/kubernetes/admin.conf $HOME\.kube\config
+scp <服务器用户名>@<主节点地址>:/etc/kubernetes/admin.conf $HOME\.kube\config
 ```
 
 3. 打开 kubeconfig，找到 `server:` 这一行。
@@ -107,15 +107,15 @@ scp root@<主节点公网IP>:/etc/kubernetes/admin.conf $HOME\.kube\config
 server: https://10.0.1.10:6443
 ```
 
-如果你的电脑无法访问这个内网 IP，可以把它改成主节点公网 IP：
+如果你的电脑无法访问这个内网 IP，可以把它改成主节点地址：
 
 ```text
-server: https://<主节点公网IP>:6443
+server: https://<主节点地址>:6443
 ```
 
-4. 确认云服务器安全组放行 `6443` 端口。
+4. 确认云平台网络规则允许你的电脑访问 `6443` 端口。
 
-建议只对自己的公网 IP 放行，不要对所有公网开放。
+建议只允许自己的电脑访问，不要对无关地址开放。
 
 5. 在本机测试：
 
@@ -124,13 +124,13 @@ kubectl get nodes -o wide
 kubectl get pods -A
 ```
 
-如果遇到证书错误、网络不通或安全组问题，不要在这里卡太久。你可以直接 SSH 到主节点运行 `kubectl`，或者让测试脚本使用 SSH 模式。本机 kubeconfig 只是为了方便，不是完成实验的必要条件。
+如果遇到证书错误、网络不通或云平台网络规则问题，不要在这里卡太久。你可以直接远程登录到主节点运行 `kubectl`，或者让测试脚本使用远程登录模式。本机 kubeconfig 只是为了方便，不是完成实验的必要条件。
 
 ## 4. 开始前检查
 
 在正式部署 Lab4 之前，先确认 Kubernetes 集群本身是好的。
 
-如果你已经配置了本机 kubeconfig，可以在本机执行。否则 SSH 到主节点执行。
+如果你已经配置了本机 kubeconfig，可以在本机执行。否则远程登录到主节点执行。
 
 ```bash
 kubectl get nodes -o wide
@@ -158,23 +158,23 @@ kubectl top pods -A
 
 为什么做：本实验建议在云服务器上构建镜像，不建议在本机电脑构建镜像。这样可以避免本机架构、网络、Docker 环境和服务器不一致带来的问题。
 
-如果你的主节点有公网 IP，可以直接传：
+如果你的主节点可以从本机访问，可以直接传：
 
 ```bash
-scp -r Lab4 root@<主节点公网IP>:/root/Lab4
+scp -r Lab4 <服务器用户名>@<主节点地址>:~/Lab4
 ```
 
 然后登录主节点：
 
 ```bash
-ssh root@<主节点公网IP>
-cd /root/Lab4
+ssh <服务器用户名>@<主节点地址>
+cd ~/Lab4
 ```
 
 如果你已经在主节点上下载或解压了 Lab4，只需要进入目录：
 
 ```bash
-cd /root/Lab4
+cd ~/Lab4
 ```
 
 完成后验证：
@@ -223,7 +223,7 @@ lab4-map-ruins
 
 ```text
 client
-  -> <公网IP>:30910
+  -> <节点地址>:30910
   -> lab4-gateway Service
   -> gateway Pod
   -> lab4-coordinator Service
@@ -239,14 +239,14 @@ client
 | --- | --- |
 | gateway | 对外暴露 TCP 游戏入口，维护客户端连接，把玩家操作转发给 coordinator |
 | coordinator | 处理登录、玩家会话、地图路由、跨地图操作、交易等全局逻辑 |
-| map-green | green 地图服务，处理该地图内移动、拾取、战斗等逻辑 |
+| map-green | green 地图服务，处理该地图内移动、拾取、互动等逻辑 |
 | map-cave | cave 地图服务 |
 | map-ruins | ruins 地图服务 |
 | Redis | 保存用户数据、会话数据、地图 checkpoint、leader 租约等状态 |
 
 ### 第三步：编写 Dockerfile
 
-在哪里做：主节点的 `/root/Lab4` 目录。
+在哪里做：主节点的 `~/Lab4` 目录。
 
 为什么做：Kubernetes 运行的是容器，不是直接运行 Go 源码。你需要把 gateway、coordinator、map 分别做成镜像。
 
@@ -296,7 +296,7 @@ go test ./...
 
 ### 第四步：在主节点构建镜像
 
-在哪里做：主节点的 `/root/Lab4` 目录。
+在哪里做：主节点的 `~/Lab4` 目录。
 
 为什么做：把源码变成 Kubernetes 可以运行的镜像。本实验建议镜像在服务器上构建，不要求在本机电脑上构建。
 
@@ -342,20 +342,20 @@ redis:7-alpine
 先在主节点导出镜像包：
 
 ```bash
-docker save -o /root/lab4-images.tar lab4-gateway:v1 lab4-coordinator:v1 lab4-map:v1 redis:7-alpine
+docker save -o ~/lab4-images.tar lab4-gateway:v1 lab4-coordinator:v1 lab4-map:v1 redis:7-alpine
 ```
 
 在主节点导入到 containerd：
 
 ```bash
-ctr -n k8s.io images import /root/lab4-images.tar
+ctr -n k8s.io images import ~/lab4-images.tar
 ```
 
 然后把镜像包分发到每个 worker 节点。注意这里使用的是 worker 内网 IP，因为主节点通常可以访问 worker 内网。
 
 ```bash
-scp /root/lab4-images.tar root@<worker内网IP>:/root/
-ssh root@<worker内网IP> "ctr -n k8s.io images import /root/lab4-images.tar"
+scp ~/lab4-images.tar <服务器用户名>@<worker内网IP>:~/lab4-images.tar
+ssh <服务器用户名>@<worker内网IP> "ctr -n k8s.io images import ~/lab4-images.tar"
 ```
 
 如果你有 3 个 worker 节点，就对 3 个 worker 都执行一次。
@@ -378,7 +378,7 @@ crictl images | grep redis
 
 ### 第六步：编写 Kubernetes YAML
 
-在哪里做：主节点的 `/root/Lab4` 目录。
+在哪里做：主节点的 `~/Lab4` 目录。
 
 为什么做：YAML 描述了 Kubernetes 应该创建哪些资源、每个 Pod 用哪个镜像、暴露哪些端口、如何扩缩容。
 
@@ -471,7 +471,7 @@ kubectl -n lab4 get events --sort-by=.lastTimestamp
 
 在哪里做：本机或主节点都可以。
 
-为什么做：Pod Running 不代表游戏一定能从公网访问。你还需要确认 NodePort、安全组、gateway、coordinator、map、Redis 都串起来了。
+为什么做：Pod Running 不代表游戏入口一定能访问。你还需要确认 NodePort、云平台网络规则、gateway、coordinator、map、Redis 都串起来了。
 
 先确认 gateway Service：
 
@@ -485,21 +485,21 @@ kubectl -n lab4 get svc lab4-gateway
 9310:30910/TCP
 ```
 
-确认云服务器安全组放行 `30910` 端口。
+确认云平台网络规则允许访问 `30910` 端口。
 
 然后用 admin 工具检查游戏状态：
 
 ```bash
-go run ./cmd/admin 状态 <公网IP>:30910
+go run ./cmd/admin 状态 <节点地址>:30910
 ```
 
 也可以启动交互式客户端：
 
 ```bash
-go run ./cmd/client <公网IP>:30910
+go run ./cmd/client <节点地址>:30910
 ```
 
-如果主节点没有 Go，可以在本机运行这些命令；只要本机能访问 `<公网IP>:30910` 即可。
+如果主节点没有 Go，可以在本机运行这些命令；只要本机能访问 `<节点地址>:30910` 即可。
 
 ### 第九步：运行基础测试
 
@@ -522,16 +522,16 @@ Windows PowerShell：
 如果脚本提示：
 
 ```text
-Gateway address, for example 120.79.8.174:30910:
+Gateway address, for example 203.0.113.10:30910:
 ```
 
 请输入你的游戏入口：
 
 ```text
-<公网IP>:30910
+<节点地址>:30910
 ```
 
-如果你的本机已经配置好 kubeconfig，脚本会直接访问 Kubernetes 集群检查资源。如果本机没有 kubeconfig，脚本会退回 SSH 模式，提示你输入主节点公网 IP、SSH 用户、SSH 端口等信息。
+如果你的本机已经配置好 kubeconfig，脚本会直接访问 Kubernetes 集群检查资源。如果本机没有 kubeconfig，脚本会退回远程登录模式，提示你输入主节点地址、登录用户名、连接端口等信息。
 
 ### 第十步：运行竞技评分并观察 HPA
 
@@ -560,7 +560,7 @@ LAB4_SCORE_FAST=1 LAB4_SKIP_CHAOS=1 ./test/run-scoretest.sh
 也可以手动指定游戏入口：
 
 ```bash
-LAB4_GATEWAY_ADDR=<公网IP>:30910 ./test/run-scoretest.sh
+LAB4_GATEWAY_ADDR=<节点地址>:30910 ./test/run-scoretest.sh
 ```
 
 评分时建议另开一个终端观察 HPA：
@@ -577,7 +577,7 @@ REPLICAS 从 1 增加到更多
 新增 Pod 进入 Running
 ```
 
-注意：竞技评分会真实触发 HPA 扩容。重复评分前建议等几分钟，让 HPA 缩回稳定状态，否则上一轮压测残留副本可能影响“空闲不误扩”。
+注意：竞技评分会真实触发 HPA 扩容。重复评分前建议等几分钟，让 HPA 缩回稳定状态，否则上一轮测试残留副本可能影响“空闲不误扩”。
 
 ## 6. 部署总流程
 
@@ -586,14 +586,14 @@ REPLICAS 从 1 增加到更多
 在本机：
 
 ```bash
-scp -r Lab4 root@<主节点公网IP>:/root/Lab4
-ssh root@<主节点公网IP>
+scp -r Lab4 <服务器用户名>@<主节点地址>:~/Lab4
+ssh <服务器用户名>@<主节点地址>
 ```
 
 在主节点：
 
 ```bash
-cd /root/Lab4
+cd ~/Lab4
 
 # 编写 Dockerfile.gateway / Dockerfile.coordinator / Dockerfile.map
 docker build -t lab4-gateway:v1 -f Dockerfile.gateway .
@@ -602,12 +602,12 @@ docker build -t lab4-map:v1 -f Dockerfile.map .
 docker pull m.daocloud.io/docker.io/library/redis:7-alpine
 docker tag m.daocloud.io/docker.io/library/redis:7-alpine redis:7-alpine
 
-docker save -o /root/lab4-images.tar lab4-gateway:v1 lab4-coordinator:v1 lab4-map:v1 redis:7-alpine
-ctr -n k8s.io images import /root/lab4-images.tar
+docker save -o ~/lab4-images.tar lab4-gateway:v1 lab4-coordinator:v1 lab4-map:v1 redis:7-alpine
+ctr -n k8s.io images import ~/lab4-images.tar
 
 # 对每个 worker 节点执行
-scp /root/lab4-images.tar root@<worker内网IP>:/root/
-ssh root@<worker内网IP> "ctr -n k8s.io images import /root/lab4-images.tar"
+scp ~/lab4-images.tar <服务器用户名>@<worker内网IP>:~/lab4-images.tar
+ssh <服务器用户名>@<worker内网IP> "ctr -n k8s.io images import ~/lab4-images.tar"
 
 # 编写 deploy/ 下的 Kubernetes YAML
 kubectl apply -f deploy/
@@ -618,7 +618,7 @@ kubectl -n lab4 get pods,svc,hpa -o wide
 验证：
 
 ```bash
-go run ./cmd/admin 状态 <公网IP>:30910
+go run ./cmd/admin 状态 <节点地址>:30910
 ./test/run-autotest.sh
 ./test/run-scoretest.sh
 ```
@@ -770,7 +770,7 @@ CPU 目标值可以自己设置。建议先从 50% 到 70% 之间尝试，再根
 
 Redis 不建议配置 HPA。Redis 是本实验中的状态中心，随意扩缩容会带来数据一致性问题。测试脚本也会检查 Redis 不应配置 HPA。
 
-HPA 缩容、滚动更新、手动删除 Pod 时，Kubernetes 可能会回收正在承载玩家的 Pod。为了尽量做到用户无感，你需要设计生命周期处理。
+HPA 缩容、滚动更新、手动下线 Pod 时，Kubernetes 可能会回收正在承载玩家的 Pod。为了尽量做到用户无感，你需要设计生命周期处理。
 
 本代码中已经提供了一些支持逻辑，主要思路是：
 
@@ -803,16 +803,16 @@ Role 至少需要允许业务 Pod 对本命名空间内的 Pod 做必要的 `get
 低压稳定性：15
 高压弹性扩容：25
 状态一致性：20
-故障恢复：20
+异常恢复：20
 资源纪律：10
 ```
 
-评分脚本不会简单按绝对 TPS 或公网延迟打分，避免把学生电脑性能、服务器硬件、公网质量等不可控因素算进成绩。它更关注：
+评分脚本不会简单按绝对 TPS 或外部访问延迟打分，避免把学生电脑性能、服务器硬件、网络质量等不可控因素算进成绩。它更关注：
 
 - 该扩容时是否扩容。
 - 不该扩容时是否稳定。
 - 扩容后服务是否仍然正确。
-- Pod 被删除或回收时，状态是否能恢复。
+- Pod 被下线或回收时，状态是否能恢复。
 - 资源 requests/limits、HPA 和探针配置是否合理。
 
 ## 11. 常见问题
@@ -848,8 +848,8 @@ Service 能创建但外部访问不到：
 ```text
 检查 lab4-gateway 是否是 NodePort。
 检查 nodePort 是否是 30910。
-检查云服务器安全组是否放行 30910。
-检查你访问的是有公网 IP 的节点。
+检查云平台网络规则是否允许访问 30910。
+检查你访问的是可从本机访问的节点地址。
 ```
 
 为什么明明 `docker images` 有镜像，Pod 还是拉不到：
@@ -871,7 +871,7 @@ Pod 会自动迁移吗：
 
 ```text
 不会像虚拟机一样原地迁移。
-通常是旧 Pod 被删除或扩缩容创建了新 Pod，新 Pod 被调度到其他节点。
+通常是旧 Pod 下线或扩缩容创建了新 Pod，新 Pod 被调度到其他节点。
 ```
 
 ## 12. 可以优化的方向
@@ -883,8 +883,8 @@ Pod 会自动迁移吗：
 - 给不同组件设置不同资源，避免所有组件一刀切。
 - 优化 coordinator 和 map 的热点逻辑，减少无意义 CPU 消耗。
 - 让 gateway、coordinator、map 在 Pod 回收时更平滑地进入 drain。
-- 改进状态保存和恢复逻辑，降低故障期间的数据丢失概率。
+- 改进状态保存和恢复逻辑，降低异常期间的数据丢失概率。
 - 调整 HPA behavior，让扩容更及时、缩容更稳。
 - 设计更合理的 Pod 分布策略，避免所有副本堆在同一个节点。
 
-本实验的重点不是“照着模板部署成功”，而是理解一个真实游戏服务上云后会遇到的弹性、状态、故障和成本问题。部署只是起点，调优才是区分度所在。
+本实验的重点不是“照着模板部署成功”，而是理解一个真实游戏服务上云后会遇到的弹性、状态、异常恢复和成本问题。部署只是起点，调优才是区分度所在。
