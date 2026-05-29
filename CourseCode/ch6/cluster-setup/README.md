@@ -172,7 +172,7 @@ systemctl restart containerd
 systemctl enable containerd
 
 # 验证镜像源配置
-crictl pull registry.k8s.io/pause:3.10
+ctr -n k8s.io images pull registry.k8s.io/pause:3.10
 # 如果输出 "Image is up to date" 或成功拉取，说明镜像源配置正确
 # 如果仍然超时，见 "常见问题" 章节
 ```
@@ -182,8 +182,8 @@ crictl pull registry.k8s.io/pause:3.10
 ```bash
 # 添加 K8s v1.36 apt 源
 apt-get install -y apt-transport-https ca-certificates curl gpg
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list
+curl -fsSL https://mirrors.aliyun.com/kubernetes-new/core/stable/v1.36/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://mirrors.aliyun.com/kubernetes-new/core/stable/v1.36/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list
 
 # 安装
 apt-get update
@@ -283,6 +283,9 @@ sed -i 's|docker.io/flannel/flannel-cni-plugin:|registry.aliyuncs.com/google_con
 
 # 应用
 kubectl apply -f kube-flannel.yml
+
+#查看flannel的状态
+kubectl -n kube-flannel get pods -o wide
 
 # 等待 Flannel 就绪
 kubectl -n kube-system wait --for=condition=ready pod -l app=flannel --timeout=120s
