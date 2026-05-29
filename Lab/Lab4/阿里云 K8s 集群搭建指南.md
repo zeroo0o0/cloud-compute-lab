@@ -271,24 +271,29 @@ kubectl get nodes
 ### 3.4 安装 Flannel 网络插件
 
 ```bash
-# 下载 Flannel manifest
-curl -fsSL https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml -o kube-flannel.yml
+# 下载 Flannel manifest（GitHub 访问慢可用 ghproxy）
+curl -fsSL https://ghproxy.com/https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml -o kube-flannel.yml
 
 # 检查镜像地址（确认是否需要替换）
 grep "image:" kube-flannel.yml
-# 如果显示 docker.io/flannel/... 则 containerd 的 docker.io 镜像源会自动处理
-# 如果仍然拉取超时，手动替换：
-sed -i 's|docker.io/flannel/flannel:|registry.aliyuncs.com/google_containers/flannel:|g' kube-flannel.yml
-sed -i 's|docker.io/flannel/flannel-cni-plugin:|registry.aliyuncs.com/google_containers/flannel-cni-plugin:|g' kube-flannel.yml
+# 如果仍然拉取超时，替换为国内镜像源（推荐 daoCloud）
+sed -i 's|ghcr.io/flannel-io/flannel-cni-plugin:|docker.m.daocloud.io/flannel/flannel-cni-plugin:|g' kube-flannel.yml
+sed -i 's|ghcr.io/flannel-io/flannel:|docker.m.daocloud.io/flannel/flannel:|g' kube-flannel.yml
+
+sed -i \
+  -e 's#ghcr.io/flannel-io/flannel:v0.28.4#swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/flannel-io/flannel:v0.28.4#g' \
+  -e 's#ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel1#swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel1#g' \
+  kube-flannel.yml
 
 # 应用
 kubectl apply -f kube-flannel.yml
+kubectl -n kube-flannel delete pod -l app=flannel
 
-#查看flannel的状态
+# 查看 flannel 状态
 kubectl -n kube-flannel get pods -o wide
 
 # 等待 Flannel 就绪
-kubectl -n kube-system wait --for=condition=ready pod -l app=flannel --timeout=120s
+kubectl -n kube-flannel wait --for=condition=ready pod -l app=flannel --timeout=120s
 
 # 验证节点变为 Ready
 kubectl get nodes
