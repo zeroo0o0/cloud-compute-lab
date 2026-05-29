@@ -197,6 +197,8 @@ apt-mark hold kubelet kubeadm kubectl
 
 ### 3.1 编写 kubeadm 配置文件
 
+这里的advertiseAddress要改成你自己的主节点的私网IP，然后节点名称最好也加上！
+
 ```bash
 cat > kubeadm-config.yaml << 'EOF'
 apiVersion: kubeadm.k8s.io/v1beta4
@@ -276,10 +278,7 @@ curl -fsSL https://ghproxy.com/https://github.com/flannel-io/flannel/releases/la
 
 # 检查镜像地址（确认是否需要替换）
 grep "image:" kube-flannel.yml
-# 如果仍然拉取超时，替换为国内镜像源（推荐 daoCloud）
-sed -i 's|ghcr.io/flannel-io/flannel-cni-plugin:|docker.m.daocloud.io/flannel/flannel-cni-plugin:|g' kube-flannel.yml
-sed -i 's|ghcr.io/flannel-io/flannel:|docker.m.daocloud.io/flannel/flannel:|g' kube-flannel.yml
-
+# 如果仍然拉取超时，替换为国内镜像源（推荐 华为源），可能也不可用，若无法下载，则自行寻找国内镜像源
 sed -i \
   -e 's#ghcr.io/flannel-io/flannel:v0.28.4#swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/flannel-io/flannel:v0.28.4#g' \
   -e 's#ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel1#swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel1#g' \
@@ -287,6 +286,8 @@ sed -i \
 
 # 应用
 kubectl apply -f kube-flannel.yml
+
+#若已经尝试拉取了，可以用这条命令删除已经创建失败的flannel的pod
 kubectl -n kube-flannel delete pod -l app=flannel
 
 # 查看 flannel 状态
