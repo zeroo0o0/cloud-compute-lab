@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game
+  labels:
+    app: game
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: game
+  template:
+    metadata:
+      labels:
+        app: game
+    spec:
+      containers:
+        - name: game
+          image: 10.0.2.12:5000/exp7/exp7-game:v1
+          imagePullPolicy: IfNotPresent
+          command: ["/app/game"]
+          env:
+            - name: GAME_ADDR
+              value: "0.0.0.0:8081"
+          ports:
+            - name: http
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 1
+            periodSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: game-service
+spec:
+  type: ClusterIP
+  selector:
+    app: game
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: game-vpa
+spec:
+  targetRef: # 必须指向一个目标控制器（如 Deployment）
+    apiVersion: apps/v1
+    kind: Deployment
+    name: game
+  updatePolicy: # VPA 独有：更新策略
+    updateMode: "Auto"
+  resourcePolicy: # 资源边界策略
+    containerPolicies:
+      - containerName: "game" # 精确控制 Deployment 中的哪个容器
+        minAllowed:           # 无论 VPA 怎么缩容，绝不能低于这个值
+          cpu: 50m
+          memory: 32Mi
+        maxAllowed:           # 无论 VPA 怎么扩容，绝不能超过这个值
+          cpu: 1000m
+          memory: 512Mi
+        controlledResources: ["cpu", "memory"] # VPA 接管哪些资源的计算

@@ -13,9 +13,18 @@ cmd/
 │  └─ socket_client/
 ├─ exp3/
 │  ├─ step3_sticky_packets/
+│  │  ├─ server/
+│  │  └─ client/
 │  ├─ game_sticky_packets/
+│  │  ├─ server/
+│  │  └─ client/
 │  ├─ step3_framing_demo/
+│  │  ├─ server/
+│  │  └─ client/
 │  └─ TCP_reliable/
+│     ├─ server/
+│     ├─ player1/
+│     └─ player2/
 ├─ exp4/
 │  ├─ p2p_lockstep_host/
 │  └─ p2p_lockstep_client/
@@ -44,37 +53,39 @@ cmd/
 
 ## 运行入口
 
-- exp1: `go run ./cmd/exp1/loop`
-- exp2:
+- exp1：实验一：本地游戏循环
+  - `go run ./cmd/exp1/loop`
+- exp2：实验二：TCP Socket 长连接通信
   - `go run ./cmd/exp2/socket_server`
   - `go run ./cmd/exp2/socket_client`
-- exp3:
-  - `go run ./cmd/exp3/game_sticky_packets`
-  - `go run ./cmd/exp3/step3_sticky_packets/server.go`
-  - `go run ./cmd/exp3/step3_sticky_packets/client.go`
-  - `go run ./cmd/exp3/step3_framing_demo/server.go`
-  - `go run ./cmd/exp3/step3_framing_demo/client.go`
-  - `go run ./cmd/exp3/TCP_reliable/server.go`
-  - `go run ./cmd/exp3/TCP_reliable/player1.go`
-  - `go run ./cmd/exp3/TCP_reliable/player2.go`
+- exp3：实验三：TCP 字节流边界与会话状态
+  - `go run ./cmd/exp3/game_sticky_packets/server`
+  - `go run ./cmd/exp3/game_sticky_packets/client`
+  - `go run ./cmd/exp3/step3_sticky_packets/server`
+  - `go run ./cmd/exp3/step3_sticky_packets/client`
+  - `go run ./cmd/exp3/step3_framing_demo/server`
+  - `go run ./cmd/exp3/step3_framing_demo/client`
+  - `go run ./cmd/exp3/TCP_reliable/server`
+  - `go run ./cmd/exp3/TCP_reliable/player1`
+  - `go run ./cmd/exp3/TCP_reliable/player2`
   - `TCP_reliable` 为三终端配合演示：服务器显示战场网格，玩家1 负责攻击，玩家2 负责断线与重连，用于展示“旧连接内传输可靠”与“新连接状态未恢复”是两件不同的事。
   
-- exp4:
+- exp4：实验四：P2P 确定性锁步
   - `go run ./cmd/exp4/p2p_lockstep_host`
   - `go run ./cmd/exp4/p2p_lockstep_client`
-- exp5:
+- exp5：实验五：C/S 并发连接管理
   - `go run ./cmd/exp5/cs_blocking_server`
   - `go run ./cmd/exp5/cs_concurrent_server`
   - `go run ./cmd/exp5/cs_client`
-- exp5_1:
+- exp5_1：扩展实验：半开连接与僵尸玩家
   - `go run ./cmd/exp5_1/single_thread_server/zombie_server`
   - `go run ./cmd/exp5_1/single_thread_server/zombie_client`
   - `go run ./cmd/exp5_1/multi_thread_server/zombie_server`
   - `go run ./cmd/exp5_1/multi_thread_server/zombie_client`
-- exp6:
+- exp6：实验六：权威服务器状态同步
   - `go run ./cmd/exp6/authoritative_server`
   - `go run ./cmd/exp6/authoritative_client`
-- exp7:
+- exp7：实验七：超时通信与断线恢复
   - `go run ./cmd/exp7/single_thread/reliable_server`
   - `go run ./cmd/exp7/single_thread/reliable_client`
   - `go run ./cmd/exp7/multi_thread/reliable_server`
@@ -82,7 +93,8 @@ cmd/
 
 ## 命名说明
 
-- `exp5_1` 为 `exp5` 的扩展示例（僵尸连接/半开连接场景）。
+- `exp1` 到 `exp7` 对应 ch3 主 README 中的实验一到实验七。
+- `exp5_1` 为实验五的扩展示例（半开连接/僵尸玩家场景）。
 - `single_thread_server` 演示单线程 ticker 轮询读输入与广播时的读阻塞影响。
 - `multi_thread_server` 保留原有 goroutine 收包版本（`zombie_client`/`zombie_server`）。
 

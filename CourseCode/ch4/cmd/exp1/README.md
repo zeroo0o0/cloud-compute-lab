@@ -1,6 +1,6 @@
-# 实验一：突破单线程瓶颈
+# 实验一：服务器主循环解耦
 
-本实验现在按 1-6 的顺序组织：奇数步骤先看最小原理，偶数步骤再嵌入 Warzone 极简游戏场景。网络版场景压缩为 Warzone 的“玩家 ACTION -> 权威 PlayerState -> STATE_UPDATE”流程。
+本实验现在按 1-6 的顺序组织：奇数小节先看最小原理，偶数小节再嵌入 Warzone 极简游戏场景。网络版场景压缩为 Warzone 的“玩家 ACTION -> 权威 PlayerState -> STATE_UPDATE”流程。
 
 ---
 
@@ -24,7 +24,7 @@ exp1/
 
 ---
 
-## 步骤 1：串行阻塞最小原理
+## 小节 1：串行阻塞最小原理
 
 ```powershell
 go run ./cmd/exp1/01_basic_serial_blocking_demo
@@ -36,7 +36,7 @@ go run ./cmd/exp1/01_basic_serial_blocking_demo
 - 这个顺序会导致 fast 本身只需要 20ms，也要排在 slow 的 500ms 读取之后。
 - 这段只讲“串行等待导致排队”，没有任何游戏、网络协议和多玩家状态。
 
-## 步骤 2：串行阻塞嵌入 Warzone
+## 小节 2：串行阻塞嵌入 Warzone
 
 ```powershell
 # 终端1：服务端
@@ -58,7 +58,7 @@ go run ./cmd/exp1/02_network_serial_warzone/client -player slow
 
 ---
 
-## 步骤 3：goroutine 解耦最小原理
+## 小节 3：goroutine 解耦最小原理
 
 ```powershell
 go run ./cmd/exp1/03_basic_goroutine_receiver_demo
@@ -70,7 +70,7 @@ go run ./cmd/exp1/03_basic_goroutine_receiver_demo
 - 主循环启动两个 goroutine 后立刻继续执行；慢输入只阻塞自己的 goroutine。
 - 这段只讲“把等待从主循环拆出去”，不讲游戏状态同步。
 
-## 步骤 4：goroutine 解耦嵌入 Warzone
+## 小节 4：goroutine 解耦嵌入 Warzone
 
 ```powershell
 # 终端1：服务端
@@ -91,7 +91,7 @@ go run ./cmd/exp1/04_network_goroutine_warzone/client -player slow
 
 ---
 
-## 步骤 5：事件驱动最小原理
+## 小节 5：事件驱动最小原理
 
 ```powershell
 go run ./cmd/exp1/05_basic_event_driven_demo
@@ -103,7 +103,7 @@ go run ./cmd/exp1/05_basic_event_driven_demo
 - 有事件时处理事件；没有事件时进入 `default`，打印“没有事件”，然后直接进入下一 tick。
 - 这段专门让学生看“有事件”和“没事件”的区别，不混入游戏网络细节。
 
-## 步骤 6：事件驱动与增量同步嵌入 Warzone
+## 小节 6：事件驱动与增量同步嵌入 Warzone
 
 ```powershell
 # 终端1：服务端
@@ -128,5 +128,5 @@ go run ./cmd/exp1/06_network_event_driven_warzone/client -player slow
 ## 课堂提醒
 
 - 本实验故意只保留 `fast` 和 `slow` 两个玩家，因为两个输入源已经足够说明“谁在阻塞谁”。
-- 网络嵌入版的 server 和 client 已拆成同一步骤目录下的 `server/main.go` 与 `client/main.go`。
+- 网络嵌入版的 server 和 client 已拆成同一小节目录下的 `server/main.go` 与 `client/main.go`。
 - 如果要调整慢玩家延迟，可以在客户端加参数，例如 `-delay-ms 800`。

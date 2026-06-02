@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loadgen
+  template:
+    metadata:
+      labels:
+        app: loadgen
+    spec:
+      containers:
+        - name: loadgen
+          image: 10.0.2.12:5000/exp7/exp7-loadgen:v1
+          imagePullPolicy: IfNotPresent
+          command:
+            - /app/loadgen
+            - -url
+            - http://game-service:8081/burn?ms=250
+            - -stage-duration
+            - 30s

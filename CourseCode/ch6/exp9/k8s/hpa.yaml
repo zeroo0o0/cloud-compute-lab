@@ -1,0 +1,33 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: game-service-hpa
+  namespace: exp9
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: game-service
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+  # === 演示加速配置 ===
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0    # 不等待稳定窗口，立即扩容
+      policies:
+      - type: Pods
+        value: 4                        # 每次最多增加 4 个 Pod
+        periodSeconds: 15               # 每 15 秒可执行一次
+    scaleDown:
+      stabilizationWindowSeconds: 30    # 缩容冷却从 5 分钟降到 30 秒
+      policies:
+      - type: Percent
+        value: 100                      # 允许一次性缩到最小
+        periodSeconds: 30               # 每 30 秒可执行一次

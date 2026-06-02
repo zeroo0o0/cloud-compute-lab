@@ -199,6 +199,8 @@ go tool pprof -http=:8082 -alloc_space heap_bad.prof
 ```powershell
 go test ./cmd/exp5/perf_observe_demo -run '^$' -bench BenchmarkHeapAllocGood -benchmem -memprofile heap_good.prof
 go tool pprof -top -alloc_space heap_good.prof
+
+go tool pprof -http=:8083 -alloc_space heap_good.prof
 ```
 
 ### 4. 课堂上重点怎么讲

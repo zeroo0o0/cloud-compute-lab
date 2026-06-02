@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 )
 
 var heroNames = []string{
 	"archer", "knight", "mage", "healer", "rogue", "tank", "hunter", "bard",
 }
+
+var _ = strconv.Itoa // 引入 strconv 包，避免编译器优化掉 strconv.Itoa 函数
 
 func buildRankDigestSlow(rounds int) [32]byte {
 	var digest [32]byte
@@ -35,7 +38,8 @@ func buildRankDigestFast(rounds int) [32]byte {
 
 	var digest [32]byte
 	for round := 0; round < rounds; round++ {
-		digest = sha256.Sum256([]byte(fmt.Sprintf("%s:%d", names[round%len(names)], round)))
+		// digest = sha256.Sum256([]byte(fmt.Sprintf("%s:%d", names[round%len(names)], round)))
+		digest = sha256.Sum256([]byte(names[round%len(names)] + ":" + strconv.Itoa(round)))
 	}
 	return digest
 }

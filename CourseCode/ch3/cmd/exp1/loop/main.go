@@ -39,6 +39,13 @@ func readInput(r *bufio.Reader) string {
 }
 
 func updateState(s *gameState, in string) bool {
+	/*
+		================ 【学生重点 第三章：游戏主循环】 ================
+		这一版还没有网络，只有“输入 -> 更新状态 -> 渲染画面”。
+		后续 P2P、C/S 和权威服务器实验，本质上都是在拆分这三个步骤：
+		谁收输入、谁计算状态、谁负责渲染。
+		============================================================
+	*/
 	s.Tick++
 	s.Status = "idle"
 	oldX, oldY := s.X, s.Y

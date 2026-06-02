@@ -51,7 +51,13 @@ func main() {
 		}
 		id++
 		fmt.Printf("[concurrent] 接受连接 #%d from %s\n", id, conn.RemoteAddr())
-		// *** 关键：go 开启 goroutine，不阻塞 Accept 循环 ***
+		/*
+			================ 【学生重点 第三章：并发式连接处理】 ================
+			go handleClient 把每个客户端的阻塞 Read 放进独立 goroutine。
+			主 goroutine 立刻回到 Accept，继续接收新连接。
+			这就是 C/S 架构下“一慢不拖全局”的最小写法。
+			============================================================
+		*/
 		go handleClient(conn, id, &mu)
 	}
 }

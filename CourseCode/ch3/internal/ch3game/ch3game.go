@@ -37,6 +37,14 @@ func DeterministicUpdate(prev State, local Input, remote Input, isHost bool) Sta
 	next.Frame++
 	next.Event = ""
 
+	/*
+		================ 【学生重点 第三章：确定性锁步】 ================
+		Host 和 Client 都调用同一个 DeterministicUpdate。
+		差别只在于 local/remote 分别对应 P0 还是 P1。
+		只要双方收到的是同一帧的两份输入，且计算函数完全一致，
+		两台机器就能独立算出同一个世界状态。
+		============================================================
+	*/
 	var in0, in1 Input
 	if isHost {
 		in0, in1 = local, remote
@@ -53,6 +61,13 @@ func DeterministicUpdate(prev State, local Input, remote Input, isHost bool) Sta
 	dy := float64(next.P0.Y - next.P1.Y)
 	dist := math.Sqrt(dx*dx + dy*dy)
 
+	/*
+		================ 【学生重点 第三章：规则也必须确定】 ================
+		锁步同步的不是坐标结果，而是输入。
+		所以命中距离、扣血数值、死亡条件都必须在双方代码里保持一致。
+		任何一处规则不一致，都会导致两边状态逐帧漂移。
+		================================================================
+	*/
 	if in0.Attack && dist <= 1.0 {
 		next.P1.HP -= 10
 		next.Event += "P0 hit P1; "
