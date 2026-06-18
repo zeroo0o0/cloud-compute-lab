@@ -90,6 +90,10 @@ Linux/macOS：
 mkdir -p ~/.kube
 scp <服务器用户名>@<主节点地址>:/etc/kubernetes/admin.conf ~/.kube/config
 chmod 600 ~/.kube/config
+
+mkdir -p ~/.kube
+scp root@120.79.200.215:/etc/kubernetes/admin.conf ~/.kube/config
+chmod 600 ~/.kube/config
 ```
 
 Windows PowerShell：
@@ -162,6 +166,7 @@ kubectl top pods -A
 
 ```bash
 scp -r Lab4 <服务器用户名>@<主节点地址>:~/Lab4
+scp -r Lab4 <root>@<120.79.200.215>:~/Lab4
 ```
 
 然后登录主节点：
@@ -356,6 +361,11 @@ ctr -n k8s.io images import ~/lab4-images.tar
 ```bash
 scp ~/lab4-images.tar <服务器用户名>@<worker内网IP>:~/lab4-images.tar
 ssh <服务器用户名>@<worker内网IP> "ctr -n k8s.io images import ~/lab4-images.tar"
+
+scp ~/lab4-images.tar root@10.0.1.25:~/lab4-images.tar
+ssh root@10.0.1.25 "ctr -n k8s.io images import ~/lab4-images.tar"
+scp ~/lab4-images.tar root@10.0.1.26:~/lab4-images.tar
+ssh root@10.0.1.26 "ctr -n k8s.io images import ~/lab4-images.tar"
 ```
 
 如果你有 3 个 worker 节点，就对 3 个 worker 都执行一次。
@@ -491,12 +501,16 @@ kubectl -n lab4 get svc lab4-gateway
 
 ```bash
 go run ./cmd/admin 状态 <节点地址>:30910
+
+go run ./cmd/admin 状态 120.79.200.215:30910
 ```
 
 也可以启动交互式客户端：
 
 ```bash
 go run ./cmd/client <节点地址>:30910
+
+
 ```
 
 如果主节点没有 Go，可以在本机运行这些命令；只要本机能访问 `<节点地址>:30910` 即可。
@@ -529,6 +543,8 @@ Gateway address, for example 203.0.113.10:30910:
 
 ```text
 <节点地址>:30910
+
+120.79.200.215:30910
 ```
 
 如果你的本机已经配置好 kubeconfig，脚本会直接访问 Kubernetes 集群检查资源。如果本机没有 kubeconfig，脚本会退回远程登录模式，提示你输入主节点地址、登录用户名、连接端口等信息。

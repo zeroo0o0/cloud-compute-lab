@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab4-gateway
+  namespace: lab4
+spec:
+  type: NodePort
+  ports:
+  - port: 9310
+    targetPort: 9310
+    nodePort: 30910
+    name: game
+  - port: 9311
+    targetPort: 9311
+    name: health
+  selector:
+    app: lab4-gateway
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab4-gateway
+  namespace: lab4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab4-gateway
+  template:
+    metadata:
+      labels:
+        app: lab4-gateway
+    spec:
+      serviceAccountName: lab4-sa
+      containers:
+      - name: gateway
+        image: lab4-gateway:v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9310
+        - containerPort: 9311
+        env:
+        - name: LAB4_GATEWAY_ADDR
+          value: "0.0.0.0:9310"
+        - name: LAB4_GATEWAY_HEALTH_ADDR
+          value: "0.0.0.0:9311"
+        - name: LAB4_COORDINATOR_URL
+          value: "http://lab4-coordinator:9320"
+        - name: LAB4_NAMESPACE
+          value: "lab4"
+        resources:
+          requests:
+            cpu: "60m"
+            memory: "64Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 9311
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 9311
+          initialDelaySeconds: 15
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/usr/bin/wget", "-qO-", "http://localhost:9311/drain"]
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - lab4-gateway
+              topologyKey: "kubernetes.io/hostname"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: lab4-gateway
+  namespace: lab4
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: lab4-gateway
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+  behavior:
+    scaleUp:
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 4
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15

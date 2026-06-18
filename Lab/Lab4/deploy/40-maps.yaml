@@ -1,0 +1,332 @@
+# Map Green
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab4-map-green
+  namespace: lab4
+spec:
+  ports:
+  - port: 9400
+  selector:
+    app: lab4-map-green
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab4-map-green
+  namespace: lab4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab4-map-green
+  template:
+    metadata:
+      labels:
+        app: lab4-map-green
+    spec:
+      serviceAccountName: lab4-sa
+      containers:
+      - name: map
+        image: lab4-map:v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9400
+        env:
+        - name: LAB4_MAP_LISTEN_ADDR
+          value: ":9400"
+        - name: LAB4_STATE_BACKEND
+          value: "redis"
+        - name: LAB4_REDIS_ADDR
+          value: "lab4-redis:6379"
+        - name: LAB4_REDIS_PREFIX
+          value: "lab4"
+        - name: LAB4_MAP_ID
+          value: "green"
+        - name: LAB4_NODE_ID
+          value: "map-green"
+        - name: LAB4_COMPONENT
+          value: "map-green"
+        - name: LAB4_NAMESPACE
+          value: "lab4"
+        resources:
+          requests:
+            cpu: "60m"
+            memory: "64Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 9400
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/usr/bin/wget", "-qO-", "http://localhost:9400/drain"]
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - lab4-map-green
+              topologyKey: "kubernetes.io/hostname"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: lab4-map-green
+  namespace: lab4
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: lab4-map-green
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+  behavior:
+    scaleUp:
+      policies:
+      - type: Pods
+        value: 4
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+---
+# Map Cave
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab4-map-cave
+  namespace: lab4
+spec:
+  ports:
+  - port: 9400
+  selector:
+    app: lab4-map-cave
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab4-map-cave
+  namespace: lab4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab4-map-cave
+  template:
+    metadata:
+      labels:
+        app: lab4-map-cave
+    spec:
+      serviceAccountName: lab4-sa
+      containers:
+      - name: map
+        image: lab4-map:v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9400
+        env:
+        - name: LAB4_MAP_LISTEN_ADDR
+          value: ":9400"
+        - name: LAB4_STATE_BACKEND
+          value: "redis"
+        - name: LAB4_REDIS_ADDR
+          value: "lab4-redis:6379"
+        - name: LAB4_REDIS_PREFIX
+          value: "lab4"
+        - name: LAB4_MAP_ID
+          value: "cave"
+        - name: LAB4_NODE_ID
+          value: "map-cave"
+        - name: LAB4_COMPONENT
+          value: "map-cave"
+        - name: LAB4_NAMESPACE
+          value: "lab4"
+        resources:
+          requests:
+            cpu: "60m"
+            memory: "64Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 9400
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/usr/bin/wget", "-qO-", "http://localhost:9400/drain"]
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - lab4-map-cave
+              topologyKey: "kubernetes.io/hostname"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: lab4-map-cave
+  namespace: lab4
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: lab4-map-cave
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+  behavior:
+    scaleUp:
+      policies:
+      - type: Pods
+        value: 4
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+---
+# Map Ruins
+apiVersion: v1
+kind: Service
+metadata:
+  name: lab4-map-ruins
+  namespace: lab4
+spec:
+  ports:
+  - port: 9400
+  selector:
+    app: lab4-map-ruins
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab4-map-ruins
+  namespace: lab4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab4-map-ruins
+  template:
+    metadata:
+      labels:
+        app: lab4-map-ruins
+    spec:
+      serviceAccountName: lab4-sa
+      containers:
+      - name: map
+        image: lab4-map:v1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9400
+        env:
+        - name: LAB4_MAP_LISTEN_ADDR
+          value: ":9400"
+        - name: LAB4_STATE_BACKEND
+          value: "redis"
+        - name: LAB4_REDIS_ADDR
+          value: "lab4-redis:6379"
+        - name: LAB4_REDIS_PREFIX
+          value: "lab4"
+        - name: LAB4_MAP_ID
+          value: "ruins"
+        - name: LAB4_NODE_ID
+          value: "map-ruins"
+        - name: LAB4_COMPONENT
+          value: "map-ruins"
+        - name: LAB4_NAMESPACE
+          value: "lab4"
+        resources:
+          requests:
+            cpu: "80m"
+            memory: "64Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 9400
+          initialDelaySeconds: 1
+          periodSeconds: 2
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/usr/bin/wget", "-qO-", "http://localhost:9400/drain"]
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - lab4-map-ruins
+              topologyKey: "kubernetes.io/hostname"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: lab4-map-ruins
+  namespace: lab4
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: lab4-map-ruins
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+  behavior:
+    scaleUp:
+      policies:
+      - type: Pods
+        value: 4
+        periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
