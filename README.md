@@ -1,8 +1,8 @@
 # CloudComputeBookCode
 
-> Lab文件夹下为实验代码
->
-> 主要贡献者：Froze，fyc，czq
+> 原课程仓库：https://gitee.com/hnu-cloudcomputing/cloud-compute-book-code
+> Lab文件夹下为实验代码，框架由助教/老师搭建，实验内容由小组完成
+> 组内主要贡献者：Froze，fyc，czq
 
 云计算课程配套代码仓库，包含课程示例代码和实验代码，用于课堂演示、实验练习和课程实践。
 
