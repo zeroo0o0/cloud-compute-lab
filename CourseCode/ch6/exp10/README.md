@@ -8,96 +8,263 @@
 
 验证"按需实例化"与"用完即走"的特性，直观感受代码即服务（FaaS）、冷启动与热启动差异以及零闲置成本的优势。
 
-> 本实验提供两种部署方式：
-> - **方式 A**：部署到 K8s 集群（与 exp9/11/Lab4 共享集群）
-> - **方式 B**：使用阿里云函数计算 FC（真正的 Serverless，推荐用于演示 Scale-to-Zero）
->
-> 详细部署指南见 [deploy-aliyun.md](deploy-aliyun.md)。
+本实验仅保留 **阿里云函数计算 FC** 的部署与演示方式。
 
 ## 目录结构
 
 ```
 exp10/
 ├── cmd/
-│   ├── runtime/
-│   │   └── main.go          # FaaS 运行时：函数加载、调用、冷启动模拟
 │   └── client/
-│       └── main.go          # 测试客户端：签到请求 + 并发压测
+│       └── main.go          # 测试客户端：签到请求 + 并发压测（支持直连函数 URL）
 ├── functions/
 │   └── daily_reward/
 │       └── handler.py       # 签到奖励函数 (Python)
-├── k8s/
-│   ├── faas-runtime-deployment.yaml  # Runtime Deployment
-│   └── faas-runtime-service.yaml     # NodePort Service (30090)
-├── Dockerfile
-├── deploy.sh                # 一键部署脚本
-├── deploy-aliyun.md         # 阿里云部署指南
 ├── go.mod
 └── README.md
 ```
 
 ## 前置条件
 
-- 已完成 [集群搭建](../cluster-setup/README.md)（K8s 方式）
-- 或已开通阿里云函数计算 FC（Serverless 方式）
+- 已开通阿里云函数计算 FC（Serverless 方式）
 
 ## 运行方式
 
-### 方式一：本地运行（快速验证）
+### 阿里云函数计算 FC
+
+> 此方式演示真正的 Serverless：Scale-to-Zero、冷启动、按调用计费。
+
+#### 1) 开通函数计算
+
+1. 打开 https://fcnext.console.aliyun.com/
+2. 开通服务（按量付费，有免费额度）
+
+#### 2) 安装 Serverless Devs 工具
 
 ```bash
-cd CourseCode/ch6/exp10
+# 安装 Node.js（如未安装）
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
-# 终端 1：启动 FaaS Runtime
-go run cmd/runtime/main.go
+# 安装 Serverless Devs
+npm install -g @serverless-devs/s
 
-# 终端 2：运行测试客户端
-go run cmd/client/main.go
+# 配置阿里云认证
+s config add --provider alibabacloud
+# 按提示输入：
+#   AccessKey ID: <从 RAM 控制台获取>
+#   AccessKey Secret: <从 RAM 控制台获取>
+#   Region: cn-shanghai
 ```
 
-### 方式二：K8s 部署
+#### 3) 创建函数项目
+
+创建目录结构：
+
+```
+exp10-fc/
+├── s.yaml
+└── src/
+		└── handler.py
+```
+
+**s.yaml**：
+
+```yaml
+edition: 3.0.0
+name: daily-reward-app
+access: default
+
+vars:
+	region: cn-shanghai
+
+resources:
+	daily-reward:
+		component: fc3
+		props:
+			region: ${vars.region}
+			functionName: daily-reward
+			description: "每日签到奖励函数 - 课程实验"
+			runtime: python3.10
+			handler: handler.handler
+			cpu: 0.35
+			memorySize: 256
+			diskSize: 512
+			timeout: 30
+			environmentVariables:
+				PYTHON_ENV: production
+			code:
+				- src/
+			triggers:
+				- triggerName: http-trigger
+					triggerType: http
+					triggerConfig:
+						authType: anonymous
+						methods:
+							- GET
+							- POST
+```
+
+**src/handler.py**：
+
+```python
+#!/usr/bin/env python3
+"""每日签到奖励函数 - 阿里云函数计算版本"""
+import json
+import hashlib
+from datetime import datetime
+
+def handler(environ, start_response):
+		"""
+		阿里云 FC HTTP 触发器入口
+		符合 WSGI 规范
+		"""
+		# 解析请求
+		method = environ.get('REQUEST_METHOD', 'GET')
+		path = environ.get('PATH_INFO', '/')
+
+		# 从 query string 或 body 获取参数
+		query_string = environ.get('QUERY_STRING', '')
+		try:
+				request_body_size = int(environ.get('CONTENT_LENGTH', 0))
+		except (ValueError):
+				request_body_size = 0
+		request_body = environ['wsgi.input'].read(request_body_size) if request_body_size > 0 else b''
+
+		# 解析事件数据
+		event = {}
+		if request_body:
+				try:
+						event = json.loads(request_body)
+				except json.JSONDecodeError:
+						pass
+
+		player_id = event.get("player_id", "unknown")
+		action = event.get("action", "signin")
+		timestamp = event.get("timestamp", datetime.now().isoformat())
+
+		# 生成奖励
+		seed = hashlib.md5(f"{player_id}_{timestamp[:10]}".encode()).hexdigest()
+		gold = int(seed[:4], 16) % 100 + 10
+		exp = int(seed[4:8], 16) % 500 + 50
+		streak_day = int(seed[8:10], 16) % 7 + 1
+		streak_bonus = streak_day * 10 if streak_day > 3 else 0
+
+		result = {
+				"player_id": player_id,
+				"action": action,
+				"timestamp": timestamp,
+				"reward": {
+						"gold": gold + streak_bonus,
+						"exp": exp,
+						"streak_day": streak_day,
+						"streak_bonus": streak_bonus,
+				},
+				"message": f"签到成功！获得 {gold + streak_bonus} 金币，{exp} 经验",
+				"runtime": "aliyun-fc"
+		}
+
+		# 返回 HTTP 响应
+		status = '200 OK'
+		response_body = json.dumps(result, ensure_ascii=False).encode('utf-8')
+		response_headers = [
+				('Content-Type', 'application/json; charset=utf-8'),
+				('Content-Length', str(len(response_body)))
+		]
+		start_response(status, response_headers)
+		return [response_body]
+```
+
+#### 4) 部署
 
 ```bash
-cd CourseCode/ch6/exp10
+cd exp10
 
-# 一键部署
-bash deploy.sh
+# 部署到阿里云
+s deploy
+
+# 输出示例：
+# daily-reward:
+#   functionName: daily-reward
+#   functionArn: acs:fc:cn-shanghai:xxx:functions/daily-reward
+#   triggers:
+#     - triggerName: http-trigger
+#       url: https://xxx.cn-shanghai.fc.aliyuncs.com/2023-03-03/functions/daily-reward/triggers/http-trigger
 ```
 
-手动部署：
+#### 5) 验证
 
 ```bash
-# 1. 构建并推送镜像
-docker build --platform linux/amd64 -t ch6-exp10-runtime:latest .
-docker tag ch6-exp10-runtime:latest crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp10-runtime:latest
-docker push crpi-074nws9q0fix3aih.cn-shenzhen.personal.cr.aliyuncs.com/hnu-cloud-compute/ch6-exp10-runtime:latest
+# 使用输出中的 URL
+FUNC_URL="https://xxx.cn-shanghai.fc.aliyuncs.com/2023-03-03/functions/daily-reward/triggers/http-trigger"
 
-# 2. 部署
-kubectl create namespace exp10
-kubectl apply -f k8s/
+# 方式 A：直接用 curl 测试
 
-# 3. 验证
-export NODE_IP=<任意节点公网IP>
-curl http://$NODE_IP:30090/stats
+# 首次调用（冷启动，较慢）
+curl -X POST $FUNC_URL \
+	-H "Content-Type: application/json" \
+	-d '{"player_id":"player_001","action":"signin","timestamp":"2024-01-15T10:00:00Z"}'
 
-# 4. 手动测试
-# 加载函数
-curl -X POST http://$NODE_IP:30090/load \
-  -H "Content-Type: application/json" \
-  -d '{"name":"daily_reward","runtime":"python","handler":"handler.py","entry":"handler","memory_mb":128,"timeout_s":30}'
+# 再次调用（热启动，很快）
+curl -X POST $FUNC_URL \
+	-H "Content-Type: application/json" \
+	-d '{"player_id":"player_002","action":"signin","timestamp":"2024-01-15T10:00:00Z"}'
 
-# 调用函数
-curl -X POST "http://$NODE_IP:30090/invoke?function=daily_reward" \
-  -H "Content-Type: application/json" \
-  -d '{"event":{"player_id":"player_001","action":"signin"}}'
-
-# 5. 使用客户端
-go run cmd/client/main.go -runtime http://$NODE_IP:30090
+# 并发压测
+for i in $(seq 1 50); do
+	curl -s -X POST $FUNC_URL \
+		-H "Content-Type: application/json" \
+		-d "{\"player_id\":\"player_$i\",\"action\":\"signin\"}" &
+done
+wait
 ```
 
-### 方式三：阿里云函数计算 FC
+#### 6) 使用客户端（推荐）
 
-详见 [deploy-aliyun.md](deploy-aliyun.md) 中的"方式 B"章节。
+客户端支持直接调用函数 URL（适合已部署的 FC 服务）：
+
+```powershell
+cd e:\workspace\goproject\cloud-compute-book-code\CourseCode\ch6\exp10\cmd\client
+go run . -function-url "https://xxx.cn-shanghai.fc.aliyuncs.com/2023-03-03/functions/daily-reward/triggers/http-trigger"
+```
+
+如果已经编译过客户端，也可以直接运行：
+
+```powershell
+cd e:\workspace\goproject\cloud-compute-book-code\CourseCode\ch6\exp10\cmd\client
+./client.exe -function-url "https://xxx.cn-shanghai.fc.aliyuncs.com/2023-03-03/functions/daily-reward/triggers/http-trigger"
+```
+
+#### 7) 在控制台观察 Serverless 特性
+
+1. 打开 FC 控制台 → 函数计算 → 函数列表 → daily-reward
+2. 观察以下指标：
+
+| 特性 | 观察位置 | 预期 |
+|------|---------|------|
+| Scale-to-Zero | 函数详情 → 实例信息 | 无请求时实例数为 0 |
+| 冷启动 | 调用日志 → 首次调用耗时 | 200-500ms |
+| 热启动 | 调用日志 → 后续调用耗时 | 10-50ms |
+| 自动扩容 | 监控面板 → 并发实例数 | 压测时自动增加 |
+
+#### 8) 费用
+
+函数计算有免费额度，课程实验通常不会产生费用：
+
+| 项目 | 免费额度 | 超出单价 |
+|------|---------|---------|
+| 调用次数 | 100 万次/月 | ¥0.0133/万次 |
+| 执行时间 | 40 万 GB·秒/月 | ¥0.00011108/GB·秒 |
+| 外网出流量 | 无 | ¥0.50/GB |
+
+#### 9) 清理
+
+```bash
+# 删除函数
+s remove
+
+# 或在控制台手动删除
+```
 
 ## 预期结果
 
@@ -118,15 +285,6 @@ Duration: ~3s
 RPS: ~30
 ```
 
-## API 接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/load` | 加载函数配置 |
-| POST | `/invoke?function=name` | 调用函数 |
-| GET  | `/stats` | 查看运行统计 |
-| GET  | `/warmup?function=name` | 预热函数 |
-
 ## 关键概念
 
 - **FaaS (Function as a Service)**：代码即服务，开发者只需关注函数逻辑
@@ -135,8 +293,3 @@ RPS: ~30
 - **Scale-to-Zero**：没有请求时不产生任何计算资源消耗
 - **按需计费**：只为实际执行时间付费，空闲时段零成本
 
-## 清理
-
-```bash
-kubectl delete namespace exp10
-```
